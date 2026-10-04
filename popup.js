@@ -207,6 +207,11 @@ function closeMessage() {
 /* ---------- settings ---------- */
 function renderSettings() {
   const s = state.settings;
+  $('#sProvider').value = s.provider || 'catchmail';
+  $('#sCmDomain').value = s.catchmailDomain || 'catchmail.io';
+  $('#cmRow').hidden = ($('#sProvider').value !== 'catchmail');
+  $('#cmDomainRow').hidden = ($('#sProvider').value !== 'catchmail');
+  $('#tfNote').hidden = ($('#sProvider').value === 'catchmail');
   $('#sDot').checked = s.dot; $('#sPlus').checked = s.plus;
   $('#pGmail').checked = s.providers.gmail; $('#pOutlook').checked = s.providers.outlook; $('#pHotmail').checked = s.providers.hotmail; $('#pEdu').checked = !!s.providers.edu;
   $('#sIcon').checked = s.showIcon !== false;
@@ -223,6 +228,8 @@ async function renderHistory() {
 }
 async function saveSettings() {
   const s = state.settings;
+  s.provider = $('#sProvider').value;
+  s.catchmailDomain = ($('#sCmDomain').value || 'catchmail.io').trim().toLowerCase();
   s.dot = $('#sDot').checked; s.plus = $('#sPlus').checked;
   s.providers = { gmail: $('#pGmail').checked, outlook: $('#pOutlook').checked, hotmail: $('#pHotmail').checked, edu: $('#pEdu').checked };
   if (!s.providers.gmail && !s.providers.outlook && !s.providers.hotmail && !s.providers.edu) {

@@ -66,6 +66,19 @@
   <main id="view-settings" hidden>
     <div class="msg-bar"><button id="btnBack2" class="link">← Back</button><b>Settings</b></div>
     <div class="set">
+      <h4>Provider</h4>
+      <label class="sel">Email provider
+        <select id="sProvider">
+          <option value="catchmail">Catchmail (catchmail.io)</option>
+          <option value="temptf">temp.tf</option>
+        </select>
+      </label>
+      <div id="cmRow" class="muted small">Catchmail: any address works — the extension creates a persistent one on catchmail.io (or your own domain if you point its MX at smtp.catchmail.io). 1 req/s rate limit.</div>
+      <label class="sel" id="cmDomainRow" hidden>Custom domain (optional)
+        <input type="text" id="sCmDomain" placeholder="catchmail.io" spellcheck="false">
+      </label>
+      <div class="muted small" id="tfNote">temp.tf: random Gmail/Outlook/Hotmail aliases via the temp.tf API (documented; inbox readable by address).</div>
+
       <h4>New address type</h4>
       <label><input type="checkbox" id="sDot"> Gmail dot variants (u.s.e.r@gmail.com)</label>
       <label><input type="checkbox" id="sPlus"> Plus aliases (user+abc@…)</label>
@@ -111,8 +124,8 @@
       <label><input type="checkbox" id="sNotify"> Desktop notifications for new mail</label>
       <label class="sel">Check every
         <select id="sPoll">
+          <option value="0.0833" selected>5 seconds</option>
           <option value="0.05">3 seconds</option>
-          <option value="0.0833">5 seconds</option>
           <option value="0.1666">10 seconds</option>
           <option value="0.25">15 seconds</option>
           <option value="0.5">30 seconds</option>

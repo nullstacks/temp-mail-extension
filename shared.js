@@ -198,13 +198,15 @@ const TM = (() => {
   const DEFAULTS = {
     dot: true,
     plus: true,
-    providers: { gmail: true, outlook: false, hotmail: false, edu: false },
+    providers: { catchmail: true, gmail: true, outlook: false, hotmail: false, edu: false },
+    provider: 'catchmail', // active provider: catchmail | temp.tf
+    catchmailDomain: 'catchmail.io',
     eduToken: 'edu',
     showIcon: true,
     notify: true,
     fillIdentity: true,
     fillPassword: true,
-    pollMinutes: 0.5,
+    pollMinutes: 0.0833,
     country: 'US',
     gender: 'any',
     minAge: 22,
@@ -388,7 +390,31 @@ const TM = (() => {
     return p.toString();
   }
 
+  // Catchmail (catchmail.io): open API, any address works on catchmail.io or a
+  // custom domain (MX -> smtp.catchmail.io). Mailboxes are create-only — there's
+  // no endpoint to list an existing random address, so we generate a persistent
+  // local address (saved to storage = stays constant until Change).
+  const CM_API = 'https://api.catchmail.io/api/v1';
+  const CM_DOMAIN_DEFAULT = 'catchmail.io';
+  const cmApiFetch = (path, opts = {}) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000);
+    return fetch(CM_API + path, { ...opts, signal: ctrl.signal })
+      .finally(() => clearTimeout(t));
+  };
+  const cmRandom = () => 'mx' + Array.from({ length: 10 }, () => 'abcdefghjkmnpqrstuvwxyz23456789'[rnd(31)]).join('') + Date.now().toString(36).slice(-4);
+
   async function requestAccount(s) {
+    const active = s.provider === 'catchmail' ? 'catchmail' : 'temptf';
+    if (active === 'catchmail') {
+      const dom = (s.catchmailDomain || CM_DOMAIN_DEFAULT).trim().toLowerCase();
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(dom)) throw new Error('Invalid catchmail domain');
+      return cmRandom() + '@' + dom;
+    }
+    return requestTemptf(s);
+  }
+
+  async function requestTemptf(s) {
     const wantsEdu = !!s.providers.edu;
     const onlyEdu = wantsEdu && !s.providers.gmail && !s.providers.outlook && !s.providers.hotmail;
     const tokens = wantsEdu ? [...new Set([s.eduToken, ...EDU_TOKENS].filter(Boolean))] : [null];
@@ -487,12 +513,44 @@ const TM = (() => {
     const cur = await ensureEmail();
     let json;
     try {
-      const r = await apiFetch('/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cur.email })
-      });
-      json = await r.json();
+      if (/@(gmail|outlook|hotmail)\.com$/i.test(cur.email) || /@[\w.-]*edu\.pl$/i.test(cur.email)) {
+        // temp.tf address
+        const r = await apiFetch('/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cur.email })
+        });
+        json = { data: (await r.json()).data };
+      } else {
+        // catchmail (or custom-domain) address: paginated listing + per-message detail
+        const r = await cmApiFetch('/mailbox?address=' + encodeURIComponent(cur.email) + '&page_size=50');
+        if (!r.ok) {
+          let msg = '';
+          try { msg = (await r.json()).error.message; } catch (_) {}
+          throw new Error(msg || `HTTP ${r.status}`);
+        }
+        const list = await r.json();
+        json = { data: await Promise.all((list.messages || []).map(async m => {
+          try {
+            const d = await (await cmApiFetch('/message/' + encodeURIComponent(m.id) + '?mailbox=' + encodeURIComponent(cur.email))).json();
+            return {
+              id: d.id,
+              from: d.from,
+              subject: d.subject,
+              date: d.date,
+              body: (d.body && (d.body.html || d.body.text)) || '',
+              bodyContentType: d.body && d.body.html ? 'html' : 'text',
+              attachments: (d.attachments || []).map(a => ({
+                id: a.id, name: a.filename, contentType: a.content_type, size: a.size,
+                downloadUrl: a.download_url
+              })),
+              inlineCids: {}
+            };
+          } catch (_) {
+            return { id: m.id, from: m.from, subject: m.subject, date: m.date, body: '', bodyContentType: 'text', attachments: [], inlineCids: {} };
+          }
+        })) };
+      }
     } catch (e) {
       const { inbox } = await chrome.storage.session.get('inbox');
       if (inbox && inbox.email === cur.email) await chrome.storage.session.set({ inbox: { ...inbox, error: e.message } });
@@ -539,6 +597,13 @@ const TM = (() => {
     `${API}/attachment?email=${encodeURIComponent(email)}&messageId=${encodeURIComponent(messageId)}&attachmentId=${encodeURIComponent(attachmentId)}`;
 
   async function fetchAttachment(email, messageId, attachmentId) {
+    // catchmail messages carry a relative download_url on the catchmail API
+    const isCm = /@catchmail\.io$/i.test(email) || !/@(gmail|outlook|hotmail)\.com$/i.test(email) && !/@[\w.-]*edu\.pl$/i.test(email);
+    if (isCm) {
+      const r = await cmApiFetch(`/attachment/${encodeURIComponent(messageId)}/${encodeURIComponent(attachmentId)}?mailbox=${encodeURIComponent(email)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.blob();
+    }
     const r = await apiFetch(attachmentUrl(email, messageId, attachmentId).slice(API.length));
     return r.blob();
   }
