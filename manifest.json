@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Nullstacks Temp Mail",
-  "version": "1.0.0",
-  "description": "Disposable email powered by temp.tf \u2014 one address that stays constant until you change it. One-click form autofill, inbox with OTP copy, HTML viewer, attachments.",
+  "name": "TempMail for temp.tf",
+  "version": "1.1.0",
+  "description": "Persistent disposable email with inbox, notifications, OTP detection and one-click form autofill. Powered by the temp.tf API.",
   "permissions": [
     "storage",
     "alarms",
     "notifications",
-    "contextMenus",
-    "clipboardWrite",
-    "downloads"
+    "activeTab",
+    "scripting",
+    "contextMenus"
   ],
   "host_permissions": [
     "https://temp.tf/*"
@@ -17,26 +17,12 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle",
-      "all_frames": true
-    }
-  ],
   "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "Nullstacks Temp Mail (temp.tf)",
+    "default_popup": "popup.html",
+    "default_title": "TempMail",
     "default_icon": {
       "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "32": "icons/icon32.png"
     }
   },
   "icons": {
@@ -46,11 +32,30 @@
     "128": "icons/icon128.png"
   },
   "commands": {
-    "fill-email": {
+    "autofill-form": {
       "suggested_key": {
-        "default": "Alt+Shift+E"
+        "default": "Alt+Shift+F"
       },
-      "description": "Fill email field on page with temp mail address"
+      "description": "Autofill the current page's form with the temp email"
+    },
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+M"
+      },
+      "description": "Open TempMail"
     }
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
 }

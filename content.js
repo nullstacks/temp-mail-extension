@@ -1,180 +1,176 @@
-// Nullstacks Temp Mail — content script
-// Detects email fields on any page; injects a small autofill pill next to them.
-// Handles fill / copyToClipboard / toast commands from the service worker.
-
+/* TempMail: always-visible mini envelope icon inside email fields. Click = fill temp email. Shift+click = autofill whole form. */
 (() => {
-  if (window.__nullstacksTM) return;
-  window.__nullstacksTM = true;
+  if (window.__tmIconLoaded) return;
+  window.__tmIconLoaded = true;
 
-  const PILL_ID = "__ns-tm-pill";
-  let pill = null;
-  let pillTarget = null;
-  let hideTimer = null;
+  let email = null, enabled = true, dead = false;
+  const tracked = new Map(); // input -> button
+  const SIZE = 22;
 
-  // ---------- email field detection ----------
+  /* ---------- overlay (closed shadow root so page CSS/JS can't touch it) ---------- */
+  const host = document.createElement('tempmail-icons');
+  host.style.cssText = 'all:initial;position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
+  const root = host.attachShadow({ mode: 'closed' });
+  const CSS = `button{all:initial;position:fixed;top:0;left:0;width:${SIZE}px;height:${SIZE}px;border-radius:50%;
+      background:#4f46e5;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;pointer-events:auto;
+      display:none;align-items:center;justify-content:center;opacity:.92;transition:transform .12s,opacity .12s,background .2s}
+    button:hover{opacity:1;filter:brightness(1.12)}
+    button.ok{background:#059669}
+    svg{width:13px;height:13px;pointer-events:none}`;
+  try { // constructable stylesheets are exempt from the page's style-src CSP
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(CSS);
+    root.adoptedStyleSheets = [sheet];
+  } catch (_) {
+    const st = document.createElement('style'); st.textContent = CSS; root.appendChild(st);
+  }
+
+  // Build SVG with DOM APIs (innerHTML is blocked on Trusted Types sites)
+  const NS = 'http://www.w3.org/2000/svg';
+  function svgIcon(kind) {
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    for (const [k, v] of [['fill', 'none'], ['stroke', '#fff'], ['stroke-width', kind === 'ok' ? '3' : '2.2'],
+                          ['stroke-linecap', 'round'], ['stroke-linejoin', 'round']]) svg.setAttribute(k, v);
+    const add = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); };
+    if (kind === 'ok') add('path', { d: 'M5 12.5l4.5 4.5L19 7.5' });
+    else { add('rect', { x: 3, y: 5, width: 18, height: 14, rx: 2.5 }); add('path', { d: 'M3.5 7l8.5 6.5L20.5 7' }); }
+    return svg;
+  }
+  const setIcon = (btn, kind) => { btn.textContent = ''; btn.appendChild(svgIcon(kind)); };
+
+  /* ---------- detection ---------- */
   function isEmailField(el) {
-    if (!el || el.disabled || el.readOnly) return false;
-    const tag = (el.tagName || "").toLowerCase();
-    if (tag !== "input") return false;
-    const type = (el.getAttribute("type") || "text").toLowerCase();
-    if (type === "email") return true;
-    if (type !== "text" && type !== "tel" && type !== "") return false;
-    const name = (el.name || "") + " " + (el.id || "") + " " + (el.placeholder || "") + " " + (el.getAttribute("autocomplete") || "") + " " + (el.getAttribute("aria-label") || "");
-    return /e[\-_ ]?mail/i.test(name);
+    if (!(el instanceof HTMLInputElement)) return false;
+    const type = (el.type || 'text').toLowerCase();
+    if (type === 'email') return true;
+    if (type !== 'text') return false;
+    let meta = [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('data-testid')].join(' ');
+    try { if (el.labels && el.labels[0]) meta += ' ' + el.labels[0].textContent; } catch (_) {}
+    meta = meta.toLowerCase().replace(/[_\-.\[\]]+/g, ' ');
+    return /e ?mail/.test(meta) && !/search/.test(meta);
+  }
+  function collect(rootNode, out) {
+    rootNode.querySelectorAll('input').forEach(e => { if (isEmailField(e)) out.add(e); });
+    rootNode.querySelectorAll('*').forEach(e => { if (e.shadowRoot) collect(e.shadowRoot, out); });
   }
 
-  function findEmailFields() {
-    return [...document.querySelectorAll('input[type="email"], input[type="text"]')].filter(isEmailField);
-  }
-
-  // Native setter + React/Angular-safe event dispatch
-  function setValue(el, value) {
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-    if (setter) setter.call(el, value); else el.value = value;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+  /* ---------- fill ---------- */
+  function setVal(el, v) {
+    const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
     el.focus();
-    // blur so lazy validators fire
-    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    if (d && d.set) d.set.call(el, v); else el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   }
-
-  async function getPrimaryEmail() {
-    return new Promise((res) => {
-      try {
-        chrome.storage.local.get({ primary: null }, (v) => res(v.primary?.email || null));
-      } catch { res(null); }
+  function send(msg) {
+    return new Promise(res => {
+      try { chrome.runtime.sendMessage(msg, r => { void chrome.runtime.lastError; res(r); }); }
+      catch (_) { teardown(); res(null); }
     });
   }
-
-  // ---------- pill UI ----------
-  function removePill() {
-    if (pill) { pill.remove(); pill = null; pillTarget = null; }
+  async function onClick(input, btn, ev) {
+    ev.preventDefault(); ev.stopPropagation();
+    if (ev.shiftKey) { await send({ type: 'autofill' }); flashOk(btn); return; }
+    if (!email) { const r = await send({ type: 'ensure' }); email = r && r.email; }
+    if (!email) return;
+    setVal(input, email);
+    flashOk(btn);
+  }
+  function flashOk(btn) {
+    btn.classList.add('ok'); setIcon(btn, 'ok');
+    setTimeout(() => { btn.classList.remove('ok'); setIcon(btn, 'mail'); }, 1200);
   }
 
-  function showPill(el) {
-    if (pill && pillTarget === el) { positionPill(el); return; }
-    removePill();
-    pillTarget = el;
-    pill = document.createElement("div");
-    pill.id = PILL_ID;
-    pill.setAttribute("role", "button");
-    pill.title = "Fill with your Nullstacks temp mail address";
-    pill.textContent = "✉ temp mail";
-    Object.assign(pill.style, {
-      position: "absolute",
-      zIndex: "2147483646",
-      background: "#0f172a",
-      color: "#e2e8f0",
-      border: "1px solid #334155",
-      borderRadius: "999px",
-      font: "600 11px/1 -apple-system, system-ui, Segoe UI, Roboto, sans-serif",
-      padding: "5px 9px",
-      cursor: "pointer",
-      boxShadow: "0 4px 14px rgba(0,0,0,.35)",
-      userSelect: "none",
-      letterSpacing: ".02em"
-    });
-    pill.addEventListener("mouseenter", () => { pill.style.borderColor = "#10b981"; pill.style.color = "#34d399"; });
-    pill.addEventListener("mouseleave", () => { pill.style.borderColor = "#334155"; pill.style.color = "#e2e8f0"; });
-    pill.addEventListener("mousedown", (e) => e.preventDefault());
-    pill.addEventListener("click", async (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const email = await getPrimaryEmail();
-      if (!email) { toast("No temp address yet — open the Nullstacks Temp Mail popup"); }
-      else { setValue(el, email); toast("Filled: " + email); }
-      removePill();
-    });
-    (document.body || document.documentElement).appendChild(pill);
-    positionPill(el);
+  /* ---------- icon management ---------- */
+  function makeButton(input) {
+    const b = document.createElement('button');
+    setIcon(b, 'mail');
+    b.title = 'Fill temp email  (Shift+click: autofill whole form)';
+    b.addEventListener('mousedown', e => e.preventDefault()); // keep focus in the field
+    b.addEventListener('click', e => onClick(input, b, e));
+    root.appendChild(b);
+    return b;
   }
 
-  function positionPill(el) {
-    if (!pill || !el) return;
-    const r = el.getBoundingClientRect();
-    const pw = pill.offsetWidth || 90, ph = pill.offsetHeight || 24;
-    pill.style.left = Math.max(4, r.right - pw - 2) + "px";
-    pill.style.top = Math.max(4, r.bottom - ph + 2 + window.scrollY) + "px";
-  }
-
-  // ---------- toast ----------
-  function toast(text) {
-    const t = document.createElement("div");
-    t.textContent = text;
-    Object.assign(t.style, {
-      position: "fixed", zIndex: "2147483647",
-      left: "50%", transform: "translateX(-50%)",
-      bottom: "28px",
-      background: "#0f172a", color: "#e2e8f0",
-      border: "1px solid #10b981",
-      borderRadius: "8px",
-      font: "500 13px/1.4 -apple-system, system-ui, Segoe UI, Roboto, sans-serif",
-      padding: "10px 16px",
-      boxShadow: "0 10px 30px rgba(0,0,0,.45)",
-      maxWidth: "80vw", wordBreak: "break-all",
-      opacity: "0", transition: "opacity .18s ease"
-    });
-    (document.body || document.documentElement).appendChild(t);
-    requestAnimationFrame(() => { t.style.opacity = "1"; });
-    setTimeout(() => {
-      t.style.opacity = "0";
-      setTimeout(() => t.remove(), 250);
-    }, 2600);
-  }
-
-  // ---------- clipboard (page context = user-gesture-safe) ----------
-  async function copyText(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      try {
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.cssText = "position:fixed;opacity:0;pointer-events:none";
-        (document.body || document.documentElement).appendChild(ta);
-        ta.select();
-        const ok = document.execCommand("copy");
-        ta.remove();
-        return ok;
-      } catch { return false; }
+  function topIsField(input, x, y) {
+    const rn = input.getRootNode();
+    const t = (rn && rn.elementFromPoint ? rn : document).elementFromPoint(x, y);
+    if (!t || t === input || input.contains(t) || t.contains(input)) return true;
+    // floating labels / icon wrappers live a few levels around the input — treat them as part of the field
+    let p = input.parentElement;
+    for (let i = 0; i < 4 && p && p !== document.body && p !== document.documentElement; i++, p = p.parentElement) {
+      if (p.contains(t)) return true;
     }
+    return false;
   }
 
-  // ---------- focus-follow pill ----------
-  document.addEventListener("focusin", (e) => {
-    const el = e.target;
-    if (isEmailField(el)) {
-      clearTimeout(hideTimer);
-      showPill(el);
-    } else if (pill && !pill.contains(e.target)) {
-      hideTimer = setTimeout(() => { if (!pill?.matches(":hover")) removePill(); }, 300);
-    }
-  }, true);
-
-  window.addEventListener("scroll", () => { if (pill && pillTarget) positionPill(pillTarget); }, { passive: true });
-  window.addEventListener("resize", () => { if (pill && pillTarget) positionPill(pillTarget); }, { passive: true });
-
-  // ---------- messages from service worker ----------
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    (async () => {
-      if (msg?.type === "fill") {
-        const fields = findEmailFields();
-        if (!fields.length) { sendResponse({ ok: false, error: "No email field found on page" }); return; }
-        // pick the most-likely field: visible first, then first in DOM
-        const visible = fields.find((el) => el.offsetParent !== null && el.getBoundingClientRect().width > 0);
-        setValue(visible || fields[0], msg.email);
-        toast("Filled: " + msg.email);
-        sendResponse({ ok: true, filled: true });
-      } else if (msg?.type === "copyToClipboard") {
-        const ok = await copyText(msg.text);
-        if (ok) toast("Copied: " + msg.text);
-        sendResponse({ ok });
-      } else if (msg?.type === "toast") {
-        toast(msg.text || "");
-        sendResponse({ ok: true });
+  function position() {
+    if (dead) return;
+    for (const [input, btn] of tracked) {
+      if (!input.isConnected) { btn.remove(); tracked.delete(input); continue; }
+      const r = input.getBoundingClientRect();
+      let show = enabled && r.width >= 80 && r.height >= 18 && r.height <= 120 &&
+                 r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth && !input.disabled;
+      if (show) {
+        const cs = getComputedStyle(input);
+        show = cs.visibility !== 'hidden' && cs.display !== 'none' && +cs.opacity > 0.05;
       }
-    })();
-    return true;
-  });
+      if (show) show = topIsField(input, Math.min(r.left + r.width / 2, innerWidth - 1), r.top + r.height / 2);
+      if (!show) { btn.style.display = 'none'; continue; }
+      const x = Math.min(r.right - SIZE - 6, innerWidth - SIZE - 2);
+      const y = r.top + (r.height - SIZE) / 2;
+      btn.style.display = 'flex';
+      btn.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
+    }
+  }
+
+  function scan() {
+    if (dead || !enabled) return;
+    const found = new Set();
+    collect(document, found);
+    for (const el of found) if (!tracked.has(el)) tracked.set(el, makeButton(el));
+    position();
+  }
+
+  /* ---------- scheduling ---------- */
+  let raf = 0, scanT = 0;
+  const schedulePos = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; position(); }); };
+  const scheduleScan = () => { clearTimeout(scanT); scanT = setTimeout(scan, 250); };
+
+  function start() {
+    if (!document.documentElement) return;
+    document.documentElement.appendChild(host);
+    addEventListener('scroll', schedulePos, { capture: true, passive: true });
+    addEventListener('resize', schedulePos, { passive: true });
+    document.addEventListener('focusin', e => {
+      if (isEmailField(e.target) && !tracked.has(e.target)) { tracked.set(e.target, makeButton(e.target)); schedulePos(); }
+    }, true);
+    new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
+    setInterval(() => { if (!document.hidden) { scheduleScan(); schedulePos(); } }, 2500);
+    setInterval(() => { if (!document.hidden && tracked.size) schedulePos(); }, 400);
+    scan();
+  }
+
+  function teardown() {
+    dead = true;
+    try { host.remove(); } catch (_) {}
+    tracked.clear();
+  }
+
+  /* ---------- state from storage ---------- */
+  async function load() {
+    try {
+      const { current, settings } = await chrome.storage.local.get(['current', 'settings']);
+      email = current ? current.email : null;
+      enabled = !settings || settings.showIcon !== false;
+      if (!enabled) for (const b of tracked.values()) b.style.display = 'none'; else scan();
+    } catch (_) { teardown(); }
+  }
+  try {
+    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.current || ch.settings)) load(); });
+  } catch (_) {}
+
+  load();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

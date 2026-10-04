@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><img src="icons/icon32.png" alt=""><span>TempMail</span></div>
+    <div class="hdr">
+      <button id="btnRefresh" class="icon" title="Refresh inbox">↻</button>
+      <button id="btnSettings" class="icon" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- MAIN -->
+  <main id="view-main">
+    <div class="card">
+      <div class="label">Your temporary address</div>
+      <div id="email" class="email" title="Click to copy">Loading…</div>
+      <div id="emailErr" class="err" hidden></div>
+      <div class="row">
+        <button id="btnCopy" class="btn primary">Copy</button>
+        <button id="btnFill" class="btn accent">Autofill form</button>
+        <button id="btnNew" class="btn">Change</button>
+      </div>
+      <details id="identity">
+        <summary>Fake identity (click a row to copy)</summary>
+        <div id="idBox"></div>
+        <button id="btnRegen" class="link">Generate new identity</button>
+      </details>
+    </div>
+
+    <div class="inbox-head">
+      <b>Inbox</b><span id="count" class="muted"></span>
+      <span class="spacer"></span>
+      <button id="btnReadAll" class="link">Mark all read</button>
+    </div>
+    <div id="status" class="status" hidden></div>
+    <ul id="list"></ul>
+    <div id="empty" class="empty" hidden>
+      <div class="big">📭</div>
+      <div>Waiting for mail…</div>
+      <div class="muted">Checks automatically in the background.</div>
+    </div>
+  </main>
+
+  <!-- MESSAGE -->
+  <main id="view-msg" hidden>
+    <div class="msg-bar">
+      <button id="btnBack" class="link">← Back</button>
+    </div>
+    <div class="msg-meta">
+      <div id="mSubject" class="subject"></div>
+      <div id="mFrom" class="muted"></div>
+      <div id="mDate" class="muted"></div>
+    </div>
+    <div id="mCodes" class="chips"></div>
+    <div id="mLinks"></div>
+    <div id="mImgBar" class="imgbar" hidden>Remote images blocked <button id="btnImgs" class="link">Load</button></div>
+    <iframe id="mFrame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>
+    <div id="mAtt" class="atts"></div>
+  </main>
+
+  <!-- SETTINGS -->
+  <main id="view-settings" hidden>
+    <div class="msg-bar"><button id="btnBack2" class="link">← Back</button><b>Settings</b></div>
+    <div class="set">
+      <h4>New address type</h4>
+      <label><input type="checkbox" id="sDot"> Gmail dot variants (u.s.e.r@gmail.com)</label>
+      <label><input type="checkbox" id="sPlus"> Plus aliases (user+abc@…)</label>
+      <div class="provs">
+        <label><input type="checkbox" id="pGmail"> Gmail</label>
+        <label><input type="checkbox" id="pOutlook"> Outlook</label>
+        <label><input type="checkbox" id="pHotmail"> Hotmail</label>
+        <label><input type="checkbox" id="pEdu"> high.edu.pl</label>
+      </div>
+      <div class="muted small">Gmail only by default. high.edu.pl (edu) is offered on the temp.tf site but isn’t documented in its API — if the API refuses it, you’ll see an error. Applies the next time you press “Change”. Some sites reject “+” addresses — use dot-only (Gmail) for those.</div>
+
+      <h4>Autofill</h4>
+      <label><input type="checkbox" id="sIcon"> Show mini email icon inside email fields</label>
+      <label><input type="checkbox" id="sIdent"> Fill name, company, address, phone, DOB, gender…</label>
+      <label><input type="checkbox" id="sPass"> Fill password fields (generated)</label>
+      <div class="muted small">Shortcut: Alt+Shift+F · or right-click any field. Edit at chrome://extensions/shortcuts</div>
+
+      <h4>Fake identity</h4>
+      <label class="sel">Country
+        <select id="sCountry">
+          <option value="RANDOM">Random</option>
+          <option value="US">United States</option>
+          <option value="IN">India</option>
+          <option value="GB">United Kingdom</option>
+          <option value="CA">Canada</option>
+          <option value="AU">Australia</option>
+          <option value="DE">Germany</option>
+        </select>
+      </label>
+      <label class="sel">Gender
+        <select id="sGender">
+          <option value="any">Random</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+      </label>
+      <label class="sel">Age range
+        <span class="ages"><input type="number" id="sMinAge" min="13" max="100"> to <input type="number" id="sMaxAge" min="13" max="100"></span>
+      </label>
+      <div class="muted small">Applies to the next generated identity (press “Generate new identity” or “Change”). Data is random and fake — for testing/privacy, not for impersonation.</div>
+
+      <h4>Inbox</h4>
+      <label><input type="checkbox" id="sNotify"> Desktop notifications for new mail</label>
+      <label class="sel">Check every
+        <select id="sPoll">
+          <option value="0.05">3 seconds</option>
+          <option value="0.0833">5 seconds</option>
+          <option value="0.1666">10 seconds</option>
+          <option value="0.25">15 seconds</option>
+          <option value="0.5">30 seconds</option>
+          <option value="1">1 minute</option>
+          <option value="2">2 minutes</option>
+          <option value="5">5 minutes</option>
+          <option value="10">10 minutes</option>
+        </select>
+      </label>
+      <div class="muted small">Intervals under 30 s are best-effort: they run while the browser is active and drift to ~30 s if the service worker idles. Shorter intervals use more of temp.tf's 60 req/min budget.</div>
+
+      <h4>Previous addresses</h4>
+      <ul id="hist"></ul>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

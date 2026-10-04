@@ -8,5 +8,5 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Build artifacts (the repo is the source of truth; zips go to Releases)
+# Build artifacts (zips go to Releases)
 *.zip
