@@ -1,4 +1,4 @@
-# TempMail for temp.tf (Chrome / Brave, Manifest V3)
+# TempMail (Chrome / Brave, Manifest V3)
 
 Install: open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode** → **Load unpacked** → select this folder.
 
