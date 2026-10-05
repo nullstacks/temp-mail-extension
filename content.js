@@ -1,28 +1,44 @@
-/* TempMail: always-visible mini envelope icon inside email fields. Click = fill temp email. Shift+click = autofill whole form. */
+/* TempMail: mini envelope icon inside email fields. Click = fill temp email. Shift+click = autofill whole form.
+   Performance model: nothing runs until an email field exists; only fields in the viewport are measured
+   (IntersectionObserver); DOM changes are handled incrementally (added nodes only); layout reads and writes
+   are batched; no timers run while no email field is visible. */
 (() => {
   if (window.__tmIconLoaded) return;
   window.__tmIconLoaded = true;
+  // 1x1 tracker / ad frames never contain a usable form
+  if (window !== window.top && (innerWidth < 100 || innerHeight < 30)) return;
 
-  let email = null, enabled = true, dead = false;
-  const tracked = new Map(); // input -> button
+  let email = null, dead = false, active = false;
+  const tracked = new Map(); // input -> { btn }
+  const inView = new Set();  // inputs currently intersecting the viewport
+  const pending = new Set(); // added nodes waiting to be scanned
+  let observedRoots = new WeakSet();
+  let io = null, mo = null, host = null, root = null;
+  let raf = 0, scanT = 0, tickT = 0;
   const SIZE = 22;
 
-  /* ---------- overlay (closed shadow root so page CSS/JS can't touch it) ---------- */
-  const host = document.createElement('tempmail-icons');
-  host.style.cssText = 'all:initial;position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
-  const root = host.attachShadow({ mode: 'closed' });
+  /* ---------- overlay (created lazily, closed shadow root so page CSS/JS can't touch it) ---------- */
   const CSS = `button{all:initial;position:fixed;top:0;left:0;width:${SIZE}px;height:${SIZE}px;border-radius:50%;
       background:#4f46e5;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;pointer-events:auto;
       display:none;align-items:center;justify-content:center;opacity:.92;transition:transform .12s,opacity .12s,background .2s}
     button:hover{opacity:1;filter:brightness(1.12)}
     button.ok{background:#059669}
     svg{width:13px;height:13px;pointer-events:none}`;
-  try { // constructable stylesheets are exempt from the page's style-src CSP
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(CSS);
-    root.adoptedStyleSheets = [sheet];
-  } catch (_) {
-    const st = document.createElement('style'); st.textContent = CSS; root.appendChild(st);
+  let sheet = null;
+  function ensureHost() {
+    if (host) return true;
+    if (!document.documentElement) return false;
+    host = document.createElement('tempmail-icons');
+    host.style.cssText = 'all:initial;position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
+    root = host.attachShadow({ mode: 'closed' });
+    try { // constructable stylesheets are exempt from the page's style-src CSP
+      if (!sheet) { sheet = new CSSStyleSheet(); sheet.replaceSync(CSS); }
+      root.adoptedStyleSheets = [sheet];
+    } catch (_) {
+      const st = document.createElement('style'); st.textContent = CSS; root.appendChild(st);
+    }
+    document.documentElement.appendChild(host);
+    return true;
   }
 
   // Build SVG with DOM APIs (innerHTML is blocked on Trusted Types sites)
@@ -50,10 +66,37 @@
     meta = meta.toLowerCase().replace(/[_\-.\[\]]+/g, ' ');
     return /e ?mail/.test(meta) && !/search/.test(meta);
   }
-  function collect(rootNode, out) {
-    rootNode.querySelectorAll('input').forEach(e => { if (isEmailField(e)) out.add(e); });
-    rootNode.querySelectorAll('*').forEach(e => { if (e.shadowRoot) collect(e.shadowRoot, out); });
+
+  function consider(el) {
+    if (!active || tracked.has(el) || !isEmailField(el)) return;
+    tracked.set(el, { btn: null });
+    io.observe(el); // the observer reports when it enters the viewport
   }
+
+  function watchRoot(sr) {
+    if (observedRoots.has(sr)) return;
+    observedRoots.add(sr);
+    mo.observe(sr, { childList: true, subtree: true });
+    scanTree(sr);
+  }
+
+  // Scan only the given subtree (never the whole document except on first load)
+  function scanTree(node) {
+    if (!node.querySelectorAll) return;
+    if (node.localName === 'input') consider(node);
+    node.querySelectorAll('input').forEach(consider);
+    if (node.shadowRoot) watchRoot(node.shadowRoot);
+    node.querySelectorAll('*').forEach(e => { if (e.shadowRoot) watchRoot(e.shadowRoot); });
+  }
+
+  function flush() {
+    scanT = 0;
+    if (!active) return;
+    const nodes = [...pending]; pending.clear();
+    if (nodes.length > 300) { scanTree(document); return; } // huge re-render: one pass beats hundreds of subtree scans
+    for (const n of nodes) if (n.isConnected) scanTree(n);
+  }
+  const scheduleScan = () => { if (!scanT) scanT = setTimeout(flush, 200); };
 
   /* ---------- fill ---------- */
   function setVal(el, v) {
@@ -84,6 +127,7 @@
 
   /* ---------- icon management ---------- */
   function makeButton(input) {
+    if (!ensureHost()) return null;
     const b = document.createElement('button');
     setIcon(b, 'mail');
     b.title = 'Fill temp email  (Shift+click: autofill whole form)';
@@ -91,6 +135,13 @@
     b.addEventListener('click', e => onClick(input, b, e));
     root.appendChild(b);
     return b;
+  }
+
+  function drop(input) {
+    const rec = tracked.get(input);
+    if (rec && rec.btn) rec.btn.remove();
+    tracked.delete(input); inView.delete(input);
+    try { io.unobserve(input); } catch (_) {}
   }
 
   function topIsField(input, x, y) {
@@ -105,72 +156,107 @@
     return false;
   }
 
+  // Phase 1 reads layout for every visible field, phase 2 writes styles: no layout thrashing.
   function position() {
-    if (dead) return;
-    for (const [input, btn] of tracked) {
-      if (!input.isConnected) { btn.remove(); tracked.delete(input); continue; }
+    if (dead || !active || !inView.size) return;
+    const results = [];
+    for (const input of inView) {
+      if (!input.isConnected) { drop(input); continue; }
       const r = input.getBoundingClientRect();
-      let show = enabled && r.width >= 80 && r.height >= 18 && r.height <= 120 &&
-                 r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth && !input.disabled;
+      let show = !input.disabled && r.width >= 80 && r.height >= 18 && r.height <= 120 &&
+                 r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
       if (show) {
         const cs = getComputedStyle(input);
         show = cs.visibility !== 'hidden' && cs.display !== 'none' && +cs.opacity > 0.05;
       }
       if (show) show = topIsField(input, Math.min(r.left + r.width / 2, innerWidth - 1), r.top + r.height / 2);
-      if (!show) { btn.style.display = 'none'; continue; }
+      results.push([input, show, r]);
+    }
+    for (const [input, show, r] of results) {
+      const rec = tracked.get(input);
+      if (!rec) continue;
+      if (!show) { if (rec.btn) rec.btn.style.display = 'none'; continue; }
+      if (!rec.btn && !(rec.btn = makeButton(input))) continue;
       const x = Math.min(r.right - SIZE - 6, innerWidth - SIZE - 2);
       const y = r.top + (r.height - SIZE) / 2;
-      btn.style.display = 'flex';
-      btn.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
+      rec.btn.style.display = 'flex';
+      rec.btn.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
     }
   }
 
-  function scan() {
-    if (dead || !enabled) return;
-    const found = new Set();
-    collect(document, found);
-    for (const el of found) if (!tracked.has(el)) tracked.set(el, makeButton(el));
-    position();
+  /* ---------- scheduling ---------- */
+  const schedulePos = () => { if (!raf && inView.size) raf = requestAnimationFrame(() => { raf = 0; position(); }); };
+  // Safety net for layout changes that fire no event (CSS animations, late-loading fonts).
+  // Runs only while at least one email field is on screen and the tab is visible.
+  function ensureTick() {
+    if (tickT || !inView.size) return;
+    tickT = setTimeout(() => { tickT = 0; if (!document.hidden) position(); ensureTick(); }, 1000);
+  }
+  const onFocusIn = e => {
+    const t = e.composedPath ? e.composedPath()[0] : e.target; // sees through open shadow roots
+    if (t instanceof HTMLInputElement) consider(t);
+  };
+
+  function onIntersect(entries) {
+    for (const e of entries) {
+      const rec = tracked.get(e.target);
+      if (!rec) continue;
+      if (e.isIntersecting) inView.add(e.target);
+      else {
+        inView.delete(e.target);
+        if (rec.btn) rec.btn.style.display = 'none';
+        if (!e.target.isConnected) drop(e.target); // removed from the page: release it
+      }
+    }
+    schedulePos(); ensureTick();
   }
 
-  /* ---------- scheduling ---------- */
-  let raf = 0, scanT = 0;
-  const schedulePos = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; position(); }); };
-  const scheduleScan = () => { clearTimeout(scanT); scanT = setTimeout(scan, 250); };
-
-  function start() {
-    if (!document.documentElement) return;
-    document.documentElement.appendChild(host);
+  function activate() {
+    if (active || dead || !document.documentElement) return;
+    active = true;
+    io = new IntersectionObserver(onIntersect);
+    mo = new MutationObserver(muts => {
+      for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1 && n !== host) pending.add(n);
+      if (pending.size) scheduleScan();
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
     addEventListener('scroll', schedulePos, { capture: true, passive: true });
     addEventListener('resize', schedulePos, { passive: true });
-    document.addEventListener('focusin', e => {
-      if (isEmailField(e.target) && !tracked.has(e.target)) { tracked.set(e.target, makeButton(e.target)); schedulePos(); }
-    }, true);
-    new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
-    setInterval(() => { if (!document.hidden) { scheduleScan(); schedulePos(); } }, 2500);
-    setInterval(() => { if (!document.hidden && tracked.size) schedulePos(); }, 400);
-    scan();
+    document.addEventListener('focusin', onFocusIn, true);
+    (window.requestIdleCallback || setTimeout)(() => { if (active) scanTree(document); }); // initial pass, off the critical path
   }
 
-  function teardown() {
-    dead = true;
-    try { host.remove(); } catch (_) {}
-    tracked.clear();
+  function deactivate() {
+    if (!active) return;
+    active = false;
+    io.disconnect(); mo.disconnect(); io = mo = null;
+    removeEventListener('scroll', schedulePos, true);
+    removeEventListener('resize', schedulePos);
+    document.removeEventListener('focusin', onFocusIn, true);
+    clearTimeout(scanT); clearTimeout(tickT); scanT = tickT = 0;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    tracked.clear(); inView.clear(); pending.clear(); observedRoots = new WeakSet();
+    if (host) { try { host.remove(); } catch (_) {} host = root = null; }
   }
+
+  function teardown() { dead = true; deactivate(); }
 
   /* ---------- state from storage ---------- */
+  const wantsIcon = settings => !settings || settings.showIcon !== false;
   async function load() {
     try {
       const { current, settings } = await chrome.storage.local.get(['current', 'settings']);
       email = current ? current.email : null;
-      enabled = !settings || settings.showIcon !== false;
-      if (!enabled) for (const b of tracked.values()) b.style.display = 'none'; else scan();
+      wantsIcon(settings) ? activate() : deactivate();
     } catch (_) { teardown(); }
   }
   try {
-    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.current || ch.settings)) load(); });
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area !== 'local') return;
+      if (ch.current) email = ch.current.newValue ? ch.current.newValue.email : null;
+      if (ch.settings) wantsIcon(ch.settings.newValue) ? activate() : deactivate(); // no storage re-read, no rescan
+    });
   } catch (_) {}
 
   load();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

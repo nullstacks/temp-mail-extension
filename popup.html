@@ -8,6 +8,7 @@
   <header>
     <div class="brand"><img src="icons/icon32.png" alt=""><span>TempMail</span></div>
     <div class="hdr">
+      <button id="btnPause" class="icon" title="Pause auto-check">⏸</button>
       <button id="btnRefresh" class="icon" title="Refresh inbox">↻</button>
       <button id="btnSettings" class="icon" title="Settings">⚙</button>
     </div>
@@ -31,6 +32,10 @@
       </details>
     </div>
 
+    <div id="pausedBar" class="pausedbar" hidden>
+      <span>⏸ Auto-check paused — no background requests or notifications.</span>
+      <button id="btnResume" class="link">Resume</button>
+    </div>
     <div class="inbox-head">
       <b>Inbox</b><span id="count" class="muted"></span>
       <span class="spacer"></span>
@@ -64,81 +69,112 @@
 
   <!-- SETTINGS -->
   <main id="view-settings" hidden>
-    <div class="msg-bar"><button id="btnBack2" class="link">← Back</button><b>Settings</b></div>
+    <div class="set-bar"><button id="btnBack2" class="link">← Back</button><b>Settings</b></div>
     <div class="set">
-      <h4>Provider</h4>
-      <label class="sel">Email provider
-        <select id="sProvider">
-          <option value="catchmail">Catchmail (catchmail.io)</option>
-          <option value="temptf">temp.tf</option>
-        </select>
-      </label>
-      <div id="cmRow" class="muted small">Catchmail: any address works — the extension creates a persistent one on catchmail.io (or your own domain if you point its MX at smtp.catchmail.io). 1 req/s rate limit.</div>
-      <label class="sel" id="cmDomainRow" hidden>Custom domain (optional)
-        <input type="text" id="sCmDomain" placeholder="catchmail.io" spellcheck="false">
-      </label>
-      <div class="muted small" id="tfNote">temp.tf: random Gmail/Outlook/Hotmail aliases via the temp.tf API (documented; inbox readable by address).</div>
 
-      <h4>New address type</h4>
-      <label><input type="checkbox" id="sDot"> Gmail dot variants (u.s.e.r@gmail.com)</label>
-      <label><input type="checkbox" id="sPlus"> Plus aliases (user+abc@…)</label>
-      <div class="provs">
-        <label><input type="checkbox" id="pGmail"> Gmail</label>
-        <label><input type="checkbox" id="pOutlook"> Outlook</label>
-        <label><input type="checkbox" id="pHotmail"> Hotmail</label>
-        <label><input type="checkbox" id="pEdu"> high.edu.pl</label>
+      <section class="sec">
+        <h4>Email provider</h4>
+        <div class="seg" id="provSeg">
+          <button type="button" class="seg-btn" data-provider="catchmail">
+            <b>Catchmail</b><small>3 domains · custom MX</small>
+          </button>
+          <button type="button" class="seg-btn" data-provider="temptf">
+            <b>temp.tf</b><small>Gmail · Outlook · Hotmail</small>
+          </button>
+        </div>
+      </section>
+
+      <!-- Catchmail only -->
+      <section class="sec" id="secCatchmail">
+        <h4>Catchmail domain</h4>
+        <div class="opts" id="domOpts">
+          <button type="button" class="opt-btn" data-domain="catchmail.io">catchmail.io</button>
+          <button type="button" class="opt-btn" data-domain="mailistry.com">mailistry.com</button>
+          <button type="button" class="opt-btn" data-domain="zeppost.com">zeppost.com</button>
+          <button type="button" class="opt-btn" data-domain="__custom">Custom…</button>
+        </div>
+        <input type="text" id="sCmDomain" class="txt" placeholder="yourdomain.com" spellcheck="false" hidden>
+        <div class="hint" id="cmCustomHint" hidden>Point your domain's MX record to <code>smtp.catchmail.io</code> (priority 10). Custom domains stay private.</div>
+        <div class="hint">Any address works on these domains. Rate limit: 1 request/second.</div>
+      </section>
+
+      <!-- temp.tf only -->
+      <section class="sec" id="secTemptf">
+        <h4>temp.tf mail service</h4>
+        <div class="opts">
+          <label class="opt"><input type="checkbox" id="pGmail"><span>Gmail</span></label>
+          <label class="opt"><input type="checkbox" id="pOutlook"><span>Outlook</span></label>
+          <label class="opt"><input type="checkbox" id="pHotmail"><span>Hotmail</span></label>
+          <label class="opt"><input type="checkbox" id="pEdu"><span>high.edu.pl</span></label>
+        </div>
+        <h4 class="sub">Alias style</h4>
+        <label class="row-sw"><span>Gmail dot variants <small>u.s.e.r@gmail.com</small></span><input type="checkbox" id="sDot" class="sw"></label>
+        <label class="row-sw"><span>Plus aliases <small>user+abc@…</small></span><input type="checkbox" id="sPlus" class="sw"></label>
+        <div class="hint">Dot-only works with Gmail. Some sites reject “+” addresses. high.edu.pl isn't in the public API — if refused you'll see an error.</div>
+      </section>
+
+      <div class="hint apply-hint" id="applyHint" hidden>
+        Provider / domain changes apply to your next address.
+        <button type="button" id="btnApply" class="link">Get new address now</button>
       </div>
-      <div class="muted small">Gmail only by default. high.edu.pl (edu) is offered on the temp.tf site but isn’t documented in its API — if the API refuses it, you’ll see an error. Applies the next time you press “Change”. Some sites reject “+” addresses — use dot-only (Gmail) for those.</div>
 
-      <h4>Autofill</h4>
-      <label><input type="checkbox" id="sIcon"> Show mini email icon inside email fields</label>
-      <label><input type="checkbox" id="sIdent"> Fill name, company, address, phone, DOB, gender…</label>
-      <label><input type="checkbox" id="sPass"> Fill password fields (generated)</label>
-      <div class="muted small">Shortcut: Alt+Shift+F · or right-click any field. Edit at chrome://extensions/shortcuts</div>
+      <section class="sec">
+        <h4>Autofill</h4>
+        <label class="row-sw"><span>Mini email icon in email fields</span><input type="checkbox" id="sIcon" class="sw"></label>
+        <label class="row-sw"><span>Fill name, address, phone, DOB…</span><input type="checkbox" id="sIdent" class="sw"></label>
+        <label class="row-sw"><span>Fill password fields</span><input type="checkbox" id="sPass" class="sw"></label>
+        <div class="hint">Shortcut Alt+Shift+F, or right-click any field. Edit at chrome://extensions/shortcuts</div>
+      </section>
 
-      <h4>Fake identity</h4>
-      <label class="sel">Country
-        <select id="sCountry">
-          <option value="RANDOM">Random</option>
-          <option value="US">United States</option>
-          <option value="IN">India</option>
-          <option value="GB">United Kingdom</option>
-          <option value="CA">Canada</option>
-          <option value="AU">Australia</option>
-          <option value="DE">Germany</option>
-        </select>
-      </label>
-      <label class="sel">Gender
-        <select id="sGender">
-          <option value="any">Random</option>
-          <option value="male">Male</option>
-          <option value="female">Female</option>
-        </select>
-      </label>
-      <label class="sel">Age range
-        <span class="ages"><input type="number" id="sMinAge" min="13" max="100"> to <input type="number" id="sMaxAge" min="13" max="100"></span>
-      </label>
-      <div class="muted small">Applies to the next generated identity (press “Generate new identity” or “Change”). Data is random and fake — for testing/privacy, not for impersonation.</div>
+      <section class="sec">
+        <h4>Fake identity</h4>
+        <label class="row-sel"><span>Country</span>
+          <select id="sCountry">
+            <option value="RANDOM">Random</option>
+            <option value="US">United States</option>
+            <option value="IN">India</option>
+            <option value="GB">United Kingdom</option>
+            <option value="CA">Canada</option>
+            <option value="AU">Australia</option>
+            <option value="DE">Germany</option>
+          </select>
+        </label>
+        <label class="row-sel"><span>Gender</span>
+          <select id="sGender">
+            <option value="any">Random</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </label>
+        <label class="row-sel"><span>Age range</span>
+          <span class="ages"><input type="number" id="sMinAge" min="13" max="100"> to <input type="number" id="sMaxAge" min="13" max="100"></span>
+        </label>
+        <div class="hint">Applies to the next generated identity. Data is random and fake — for testing/privacy only.</div>
+      </section>
 
-      <h4>Inbox</h4>
-      <label><input type="checkbox" id="sNotify"> Desktop notifications for new mail</label>
-      <label class="sel">Check every
-        <select id="sPoll">
-          <option value="0.0833" selected>5 seconds</option>
-          <option value="0.05">3 seconds</option>
-          <option value="0.1666">10 seconds</option>
-          <option value="0.25">15 seconds</option>
-          <option value="0.5">30 seconds</option>
-          <option value="1">1 minute</option>
-          <option value="2">2 minutes</option>
-          <option value="5">5 minutes</option>
-          <option value="10">10 minutes</option>
-        </select>
-      </label>
-      <div class="muted small">Intervals under 30 s are best-effort: they run while the browser is active and drift to ~30 s if the service worker idles. Shorter intervals use more of temp.tf's 60 req/min budget.</div>
+      <section class="sec">
+        <h4>Inbox</h4>
+        <label class="row-sw"><span>Desktop notifications</span><input type="checkbox" id="sNotify" class="sw"></label>
+        <label class="row-sel"><span>Check every</span>
+          <select id="sPoll">
+            <option value="0.05">3 seconds</option>
+            <option value="0.0833" selected>5 seconds</option>
+            <option value="0.1666">10 seconds</option>
+            <option value="0.25">15 seconds</option>
+            <option value="0.5">30 seconds</option>
+            <option value="1">1 minute</option>
+            <option value="2">2 minutes</option>
+            <option value="5">5 minutes</option>
+            <option value="10">10 minutes</option>
+          </select>
+        </label>
+        <div class="hint">Under 30 s is best-effort while the browser is active. Catchmail allows 1 req/s; temp.tf allows 60 req/min.</div>
+      </section>
 
-      <h4>Previous addresses</h4>
-      <ul id="hist"></ul>
+      <section class="sec">
+        <h4>Previous addresses</h4>
+        <ul id="hist"></ul>
+      </section>
     </div>
   </main>
 

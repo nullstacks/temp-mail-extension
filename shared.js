@@ -199,7 +199,7 @@ const TM = (() => {
     dot: true,
     plus: true,
     providers: { catchmail: true, gmail: true, outlook: false, hotmail: false, edu: false },
-    provider: 'catchmail', // active provider: catchmail | temp.tf
+    provider: 'catchmail', // active provider: catchmail | temptf
     catchmailDomain: 'catchmail.io',
     eduToken: 'edu',
     showIcon: true,
@@ -342,11 +342,28 @@ const TM = (() => {
   }
 
   /* ----- settings ----- */
+  let settingsCache = null; // avoids a storage read on every poll / call
+  try { chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.settings) settingsCache = null; }); } catch (_) {}
   async function getSettings() {
-    const { settings } = await store.get('settings');
-    return { ...DEFAULTS, ...(settings || {}), providers: { ...DEFAULTS.providers, ...((settings && settings.providers) || {}) } };
+    if (!settingsCache) {
+      const { settings } = await store.get('settings');
+      settingsCache = { ...DEFAULTS, ...(settings || {}), providers: { ...DEFAULTS.providers, ...((settings && settings.providers) || {}) } };
+    }
+    return { ...settingsCache, providers: { ...settingsCache.providers } };
   }
-  const saveSettings = s => store.set({ settings: s });
+  const saveSettings = async s => { await store.set({ settings: s }); settingsCache = null; };
+
+  /* ----- pause ----- */
+  let pausedCache = null;
+  try { chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.paused) pausedCache = !!ch.paused.newValue; }); } catch (_) {}
+  async function isPaused() {
+    if (pausedCache === null) pausedCache = !!(await store.get('paused')).paused;
+    return pausedCache;
+  }
+  async function setPaused(v) {
+    pausedCache = !!v;
+    await store.set({ paused: !!v });
+  }
 
   /* ----- API ----- */
   async function apiFetch(path, opts = {}) {
@@ -395,13 +412,26 @@ const TM = (() => {
   // no endpoint to list an existing random address, so we generate a persistent
   // local address (saved to storage = stays constant until Change).
   const CM_API = 'https://api.catchmail.io/api/v1';
-  const CM_DOMAIN_DEFAULT = 'catchmail.io';
-  const cmApiFetch = (path, opts = {}) => {
+  const CM_DOMAINS = ['catchmail.io', 'mailistry.com', 'zeppost.com']; // public Catchmail domains
+  const CM_DOMAIN_DEFAULT = CM_DOMAINS[0];
+  // Catchmail allows 1 request/second/IP: serialise every call with a minimum gap
+  // instead of firing bursts that get 429'd.
+  let cmLast = 0, cmChain = Promise.resolve();
+  const cmGate = fn => {
+    const run = cmChain.then(async () => {
+      const wait = cmLast + 1050 - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      cmLast = Date.now();
+      return fn();
+    });
+    cmChain = run.catch(() => {});
+    return run;
+  };
+  const cmApiFetch = (path, opts = {}) => cmGate(() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 15000);
-    return fetch(CM_API + path, { ...opts, signal: ctrl.signal })
-      .finally(() => clearTimeout(t));
-  };
+    return fetch(CM_API + path, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+  });
   const cmRandom = () => 'mx' + Array.from({ length: 10 }, () => 'abcdefghjkmnpqrstuvwxyz23456789'[rnd(31)]).join('') + Date.now().toString(36).slice(-4);
 
   async function requestAccount(s) {
@@ -456,7 +486,7 @@ const TM = (() => {
       let h = history.filter(x => x.email !== email);
       if (current) h = [current, ...h.filter(x => x.email !== current.email)];
       await store.set({ current: cur, history: h.slice(0, 5) });
-      await chrome.storage.session.set({ inbox: null });
+      await chrome.storage.session.set({ inbox: null, inboxMeta: null });
       setBadge(0);
       await prune();
       return cur;
@@ -481,7 +511,7 @@ const TM = (() => {
     if (!entry) return null;
     const h = [current, ...history.filter(x => x.email !== email)].filter(Boolean).slice(0, 5);
     await store.set({ current: entry, history: h });
-    await chrome.storage.session.set({ inbox: null });
+    await chrome.storage.session.set({ inbox: null, inboxMeta: null });
     return entry;
   }
 
@@ -509,66 +539,102 @@ const TM = (() => {
     });
   }
 
-  async function refreshInbox({ notify = false } = {}) {
+  const isTempTfAddr = e => /@(gmail|outlook|hotmail)\.com$/i.test(e || '') || /@[\w.-]*edu\.pl$/i.test(e || '');
+  const byNewest = (a, b) => new Date(b.date) - new Date(a.date);
+
+  async function cmFetchDetail(email, id) {
+    const r = await cmApiFetch('/message/' + encodeURIComponent(id) + '?mailbox=' + encodeURIComponent(email));
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    return {
+      from: d.from, subject: d.subject, date: d.date,
+      body: (d.body && (d.body.html || d.body.text)) || '',
+      bodyContentType: d.body && d.body.html ? 'html' : 'text',
+      attachments: (d.attachments || []).map(a => ({ id: a.id, name: a.filename, contentType: a.content_type, size: a.size, downloadUrl: a.download_url })),
+      inlineCids: {}
+    };
+  }
+  // Full body for a message that the list only returned metadata for (used by the popup on open)
+  async function loadMessage(email, id) {
+    return isTempTfAddr(email) ? null : cmFetchDetail(email, id);
+  }
+
+  const MIN_GAP_MS = 1500;   // popup + service worker + alarm share one result inside this window
+  const DETAIL_BATCH = 3;    // new Catchmail bodies fetched per poll (newest first); the rest fill in on later polls
+  let inflight = null;
+  function refreshInbox(opts = {}) {
+    if (!inflight) {
+      inflight = (async () => {
+        if (!opts.force && await isPaused()) return null; // paused: only an explicit (forced) refresh goes through
+        return doRefresh(opts);
+      })().finally(() => { inflight = null; });
+    }
+    return inflight;
+  }
+
+  async function doRefresh({ notify = false, force = false } = {}) {
     const cur = await ensureEmail();
-    let json;
+    const ss = chrome.storage.session;
+    const { inbox: prev, inboxMeta: meta } = await ss.get(['inbox', 'inboxMeta']);
+    const prevOk = !!(prev && prev.email === cur.email);
+    if (!force && prevOk && meta && meta.email === cur.email && !meta.error && Date.now() - meta.fetchedAt < MIN_GAP_MS) {
+      return { messages: prev.messages, unread: null };
+    }
+
+    let list;
     try {
-      if (/@(gmail|outlook|hotmail)\.com$/i.test(cur.email) || /@[\w.-]*edu\.pl$/i.test(cur.email)) {
-        // temp.tf address
+      if (isTempTfAddr(cur.email)) {
         const r = await apiFetch('/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: cur.email })
         });
-        json = { data: (await r.json()).data };
+        list = ((await r.json()).data || []).map(m => ({ ...m, id: String(m.id) }));
       } else {
-        // catchmail (or custom-domain) address: paginated listing + per-message detail
         const r = await cmApiFetch('/mailbox?address=' + encodeURIComponent(cur.email) + '&page_size=50');
         if (!r.ok) {
           let msg = '';
           try { msg = (await r.json()).error.message; } catch (_) {}
           throw new Error(msg || `HTTP ${r.status}`);
         }
-        const list = await r.json();
-        json = { data: await Promise.all((list.messages || []).map(async m => {
-          try {
-            const d = await (await cmApiFetch('/message/' + encodeURIComponent(m.id) + '?mailbox=' + encodeURIComponent(cur.email))).json();
-            return {
-              id: d.id,
-              from: d.from,
-              subject: d.subject,
-              date: d.date,
-              body: (d.body && (d.body.html || d.body.text)) || '',
-              bodyContentType: d.body && d.body.html ? 'html' : 'text',
-              attachments: (d.attachments || []).map(a => ({
-                id: a.id, name: a.filename, contentType: a.content_type, size: a.size,
-                downloadUrl: a.download_url
-              })),
-              inlineCids: {}
-            };
-          } catch (_) {
-            return { id: m.id, from: m.from, subject: m.subject, date: m.date, body: '', bodyContentType: 'text', attachments: [], inlineCids: {} };
-          }
-        })) };
+        const old = new Map(prevOk ? prev.messages.map(m => [m.id, m]) : []);
+        list = ((await r.json()).messages || []).map(m => {
+          const id = String(m.id), o = old.get(id);
+          if (o && !o.partial) return o; // already have the full message: no request
+          return { id, from: m.from, subject: m.subject, date: m.date, body: '', bodyContentType: 'text', attachments: [], inlineCids: {}, partial: true };
+        }).sort(byNewest);
+        let budget = DETAIL_BATCH;
+        for (const m of list) {
+          if (!m.partial) continue;
+          if (budget-- <= 0) break;
+          try { Object.assign(m, await cmFetchDetail(cur.email, m.id), { partial: false }); }
+          catch (e) { if (/429/.test(e.message)) break; }
+        }
       }
     } catch (e) {
-      const { inbox } = await chrome.storage.session.get('inbox');
-      if (inbox && inbox.email === cur.email) await chrome.storage.session.set({ inbox: { ...inbox, error: e.message } });
+      await ss.set({ inboxMeta: { email: cur.email, fetchedAt: Date.now(), error: e.message } });
       throw e;
     }
-    const messages = (json.data || []).map(m => ({ ...m, id: String(m.id) }))
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
 
+    const messages = list.sort(byNewest);
     const { current } = await store.get('current');
     if (!current || current.email !== cur.email) return null; // address changed meanwhile
 
-    await chrome.storage.session.set({ inbox: { email: cur.email, messages, fetchedAt: Date.now(), error: null } });
+    const sig = messages.map(m => m.id + (m.partial ? 'p' : '')).join(',');
+    const changed = !prevOk || prev.sig !== sig;
+    // Small meta record every poll; the (potentially large) inbox only when something changed.
+    if (changed) await ss.set({ inbox: { email: cur.email, messages, sig }, inboxMeta: { email: cur.email, fetchedAt: Date.now(), error: null } });
+    else await ss.set({ inboxMeta: { email: cur.email, fetchedAt: Date.now(), error: null } });
+    if (!changed) return { messages: prev.messages, unread: null };
+
     const { seen = {}, notified = {} } = await store.get(['seen', 'notified']);
     const seenIds = new Set(seen[cur.email] || []);
     const notIds = new Set(notified[cur.email] || []);
     const unread = messages.filter(m => !seenIds.has(m.id));
     const fresh = unread.filter(m => !notIds.has(m.id));
     if (fresh.length) {
+      lastActivity = Date.now();
+      if (IS_SW && !fastTimer) armFastLoop();
       if (notify && (await getSettings()).notify) fresh.slice(0, 3).forEach(notifyMsg);
       notified[cur.email] = [...notIds, ...fresh.map(m => m.id)];
       await store.set({ notified });
@@ -598,7 +664,7 @@ const TM = (() => {
 
   async function fetchAttachment(email, messageId, attachmentId) {
     // catchmail messages carry a relative download_url on the catchmail API
-    const isCm = /@catchmail\.io$/i.test(email) || !/@(gmail|outlook|hotmail)\.com$/i.test(email) && !/@[\w.-]*edu\.pl$/i.test(email);
+    const isCm = !/@(gmail|outlook|hotmail)\.com$/i.test(email) && !/@[\w.-]*edu\.pl$/i.test(email);
     if (isCm) {
       const r = await cmApiFetch(`/attachment/${encodeURIComponent(messageId)}/${encodeURIComponent(attachmentId)}?mailbox=${encodeURIComponent(email)}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -634,6 +700,7 @@ const TM = (() => {
   }
 
   async function setupAlarm() {
+    if (await isPaused()) { await chrome.alarms.clear('poll'); stopFastLoop(); return; }
     const s = await getSettings();
     const mins = Math.max(0.05, s.pollMinutes || 0.5);
     // Chrome clamps alarm periods below 30s — sub-30s settings also arm a fast in-SW loop
@@ -646,30 +713,48 @@ const TM = (() => {
      inside the service worker. The SW is kept alive by the alarm wakes + any
      open popup; when it eventually idles out the 30s alarm re-arms the loop,
      so the effective interval drifts toward ~30s while fully idle. */
-  let fastTimer = null;
+  const IS_SW = typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope;
+  const IDLE_STOP_MS = 10 * 60 * 1000;
+  let fastTimer = null, fastGen = 0, fastFails = 0, lastActivity = Date.now();
   function startFastLoop(sec) {
     if (fastTimer) clearTimeout(fastTimer);
+    const gen = ++fastGen;
+    fastFails = 0;
     const tick = () => {
       fastTimer = null;
-      refreshInbox({ notify: true }).catch(() => {}).finally(() => {
-        fastTimer = setTimeout(tick, sec * 1000);
-      });
+      if (gen !== fastGen) return;
+      // quiet for 10 min with nobody looking: stop; the 30 s alarm carries on until activity resumes
+      if (Date.now() - lastActivity > IDLE_STOP_MS) return;
+      refreshInbox({ notify: true }).then(() => { fastFails = 0; }).catch(() => { fastFails++; })
+        .finally(() => {
+          if (gen !== fastGen) return;
+          // exponential backoff on errors (rate limit / offline), capped at 60 s
+          fastTimer = setTimeout(tick, Math.min(60000, sec * 1000 * 2 ** Math.min(fastFails, 4)));
+        });
     };
     fastTimer = setTimeout(tick, sec * 1000);
   }
   function armFastLoop() {
-    getSettings().then(s => {
+    if (!IS_SW) return; // only the service worker polls; the popup reads shared results
+    isPaused().then(p => p ? null : getSettings()).then(s => {
+      if (!s) return;
       const mins = s.pollMinutes || 0.5;
       if (mins < 0.5) startFastLoop(mins * 60);
     }).catch(() => {});
   }
   function stopFastLoop() {
+    fastGen++;
     if (fastTimer) { clearTimeout(fastTimer); fastTimer = null; }
+  }
+  // Called when the popup opens: resume fast polling if it had gone quiet
+  function boost() {
+    lastActivity = Date.now();
+    if (!fastTimer) armFastLoop();
   }
 
   return {
-    DEFAULTS, getSettings, saveSettings, newEmail, ensureEmail, useAddress, regenIdentity,
-    refreshInbox, getSeen, markRead, setBadge, attachmentUrl, fetchAttachment,
+    DEFAULTS, CM_DOMAINS, getSettings, saveSettings, newEmail, ensureEmail, useAddress, regenIdentity,
+    refreshInbox, loadMessage, boost, isPaused, setPaused, getSeen, markRead, setBadge, attachmentUrl, fetchAttachment,
     autofill, fillFocused, setupAlarm, armFastLoop, stopFastLoop, genPassword, makeIdentity
   };
 })();

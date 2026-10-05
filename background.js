@@ -39,9 +39,17 @@ chrome.commands.onCommand.addListener(async cmd => {
   if (tab) TM.autofill(tab.id).catch(e => console.warn('TempMail:', e));
 });
 
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area !== 'local' || !ch.paused) return;
+  if (ch.paused.newValue) { TM.stopFastLoop(); chrome.alarms.clear('poll'); }   // pause: no timers, no wake-ups
+  else { TM.setupAlarm().then(() => TM.refreshInbox({ notify: true, force: true })).catch(() => {}); } // resume: catch up now
+});
+
 chrome.notifications.onClicked.addListener(id => chrome.notifications.clear(id));
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'boost') { TM.boost(); return; }
+  if (msg && msg.type === 'rearm') { TM.setupAlarm().catch(() => {}); return; }
   if (msg && msg.type === 'ensure') {
     TM.ensureEmail().then(c => sendResponse({ email: c.email })).catch(() => sendResponse(null));
     return true;

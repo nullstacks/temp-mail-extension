@@ -1,7 +1,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const state = { current: null, messages: [], seen: new Set(), settings: null, openId: null, images: false };
+const state = { paused: false, current: null, messages: [], seen: new Set(), settings: null, openId: null, images: false };
 const textCache = new Map();
 
 /* ---------- helpers ---------- */
@@ -31,7 +31,8 @@ function senderName(from) {
   return m ? m[1].trim() || m[2] : (from || 'Unknown');
 }
 function bodyText(m) {
-  if (textCache.has(m.id)) return textCache.get(m.id);
+  const k = m.id + (m.partial ? 'p' : '');
+  if (textCache.has(k)) return textCache.get(k);
   let t = m.body || '';
   if (m.bodyContentType === 'html') {
     const doc = new DOMParser().parseFromString(t, 'text/html');
@@ -39,7 +40,7 @@ function bodyText(m) {
     t = doc.body ? doc.body.textContent : '';
   }
   t = t.replace(/\s+/g, ' ').trim();
-  textCache.set(m.id, t);
+  textCache.set(k, t);
   return t;
 }
 function extractCodes(m) {
@@ -53,6 +54,12 @@ function extractCodes(m) {
     if (kw.test(ctx)) out.add(x[0].replace(/[ -]/g, ''));
   }
   return [...out].slice(0, 3);
+}
+const codesCache = new Map();
+function codesOf(m) {
+  const k = m.id + (m.partial ? 'p' : '');
+  if (!codesCache.has(k)) codesCache.set(k, extractCodes(m));
+  return codesCache.get(k);
 }
 function extractLinks(m) {
   const found = [];
@@ -91,13 +98,32 @@ function renderEmail() {
     `<div class="idrow" data-v="${esc(v)}" title="Click to copy"><span>${esc(k)}</span><code>${esc(v)}</code></div>`).join('');
 }
 
+let listSig = null;
+function renderPause() {
+  const b = $('#btnPause');
+  b.textContent = state.paused ? '▶' : '⏸';
+  b.title = state.paused ? 'Resume auto-check' : 'Pause auto-check';
+  b.classList.toggle('on', state.paused);
+  $('#pausedBar').hidden = !state.paused;
+}
+async function setPaused(v) {
+  state.paused = v;
+  await TM.setPaused(v);
+  renderPause();
+  if (v) toast('Paused');
+  else { toast('Resumed'); refresh(true); try { chrome.runtime.sendMessage({ type: 'boost' }); } catch (_) {} }
+}
+
 function renderList() {
   const list = $('#list');
+  const sig = state.messages.map(m => m.id + (m.partial ? 'p' : '') + (state.seen.has(m.id) ? 'r' : 'u') + ago(m.date)).join('|');
+  if (sig === listSig) return; // nothing visible changed: don't rebuild the DOM
+  listSig = sig;
   const unread = state.messages.filter(m => !state.seen.has(m.id)).length;
   $('#count').textContent = state.messages.length ? `${state.messages.length} message${state.messages.length > 1 ? 's' : ''}${unread ? ` · ${unread} new` : ''}` : '';
   $('#empty').hidden = state.messages.length > 0;
   list.innerHTML = state.messages.map(m => {
-    const codes = extractCodes(m);
+    const codes = codesOf(m);
     return `<li data-id="${esc(m.id)}" class="${state.seen.has(m.id) ? '' : 'unread'}">
       <span class="dot"></span>
       <div class="li-body">
@@ -113,7 +139,7 @@ async function refresh(manual = false) {
   const btn = $('#btnRefresh');
   if (manual) btn.classList.add('spin');
   try {
-    const r = await TM.refreshInbox();
+    const r = await TM.refreshInbox({ force: manual });
     if (r) { state.messages = r.messages; state.seen = await TM.getSeen(); }
     $('#status').hidden = true;
     if (state.openId === null) renderList();
@@ -125,6 +151,7 @@ async function refresh(manual = false) {
 
 async function loadAll() {
   state.settings = await TM.getSettings();
+  state.paused = await TM.isPaused(); renderPause();
   try {
     state.current = await TM.ensureEmail();
     $('#emailErr').hidden = true;
@@ -140,6 +167,7 @@ async function loadAll() {
   state.messages = inbox && inbox.email === state.current.email ? inbox.messages : [];
   renderList();
   refresh();
+  try { chrome.runtime.sendMessage({ type: 'boost' }); } catch (_) {}
 }
 
 /* ---------- message view ---------- */
@@ -189,12 +217,21 @@ async function openMessage(id) {
   $('#mSubject').textContent = m.subject || '(no subject)';
   $('#mFrom').textContent = 'From: ' + (m.from || 'unknown');
   $('#mDate').textContent = m.date ? new Date(m.date).toLocaleString() : '';
-  $('#mCodes').innerHTML = extractCodes(m).map(c => `<button class="chip" data-code="${esc(c)}" title="Copy code">${esc(c)} · copy</button>`).join('');
+  $('#mCodes').innerHTML = ''; $('#mLinks').innerHTML = ''; $('#mAtt').innerHTML = ''; $('#mImgBar').hidden = true;
+  state.seen.add(id);
+  TM.markRead([id]);
+  if (m.partial) { // list only had metadata: fetch the body now
+    $('#mFrame').srcdoc = '<body style="font:13px system-ui;color:#888;margin:12px">Loading…</body>';
+    try {
+      const full = await TM.loadMessage(state.current.email, id);
+      if (full) Object.assign(m, full, { id, partial: false });
+    } catch (err) { toast('Could not load message: ' + err.message); }
+    if (state.openId !== id) return; // user went back meanwhile
+  }
+  $('#mCodes').innerHTML = codesOf(m).map(c => `<button class="chip" data-code="${esc(c)}" title="Copy code">${esc(c)} · copy</button>`).join('');
   $('#mLinks').innerHTML = extractLinks(m).map(u => `<div class="linkrow"><span class="u" title="${esc(u)}">${esc(u)}</span><button class="mini" data-open="${esc(u)}">Open</button><button class="mini" data-copyurl="${esc(u)}">Copy</button></div>`).join('');
   $('#mAtt').innerHTML = (m.attachments || []).map(a => `<div class="att"><span>📎 ${esc(a.name)} <span class="muted">(${fmtSize(a.size || 0)})</span></span><button class="mini" data-att="${esc(a.id)}" data-name="${esc(a.name)}">Download</button></div>`).join('');
   renderFrame(m);
-  state.seen.add(id);
-  await TM.markRead([id]);
 }
 
 function closeMessage() {
@@ -205,13 +242,37 @@ function closeMessage() {
 }
 
 /* ---------- settings ---------- */
+const CM_DOMAINS = TM.CM_DOMAINS;
+const ui = { provider: 'catchmail', domain: 'catchmail.io', custom: false };
+
+function syncSettingsView() {
+  const cm = ui.provider === 'catchmail';
+  $('#secCatchmail').hidden = !cm;
+  $('#secTemptf').hidden = cm;
+  document.querySelectorAll('#provSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.provider === ui.provider));
+  document.querySelectorAll('#domOpts .opt-btn').forEach(b => {
+    const d = b.dataset.domain;
+    b.classList.toggle('active', d === '__custom' ? ui.custom : (!ui.custom && d === ui.domain));
+  });
+  $('#sCmDomain').hidden = !ui.custom;
+  $('#cmCustomHint').hidden = !ui.custom;
+  // show "apply" hint only when the saved current address doesn't match the selection
+  const cur = state.current && state.current.email;
+  let mismatch = false;
+  if (cur) {
+    if (cm) mismatch = !cur.toLowerCase().endsWith('@' + ui.domain);
+    else mismatch = /@/.test(cur) && !/@(gmail|outlook|hotmail)\.com$|edu\.pl$/i.test(cur);
+  }
+  $('#applyHint').hidden = !mismatch;
+}
+
 function renderSettings() {
   const s = state.settings;
-  $('#sProvider').value = s.provider || 'catchmail';
-  $('#sCmDomain').value = s.catchmailDomain || 'catchmail.io';
-  $('#cmRow').hidden = ($('#sProvider').value !== 'catchmail');
-  $('#cmDomainRow').hidden = ($('#sProvider').value !== 'catchmail');
-  $('#tfNote').hidden = ($('#sProvider').value === 'catchmail');
+  ui.provider = s.provider === 'temptf' ? 'temptf' : 'catchmail';
+  const dom = (s.catchmailDomain || 'catchmail.io').toLowerCase();
+  ui.custom = !CM_DOMAINS.includes(dom);
+  ui.domain = ui.custom ? 'catchmail.io' : dom;
+  $('#sCmDomain').value = ui.custom ? dom : '';
   $('#sDot').checked = s.dot; $('#sPlus').checked = s.plus;
   $('#pGmail').checked = s.providers.gmail; $('#pOutlook').checked = s.providers.outlook; $('#pHotmail').checked = s.providers.hotmail; $('#pEdu').checked = !!s.providers.edu;
   $('#sIcon').checked = s.showIcon !== false;
@@ -219,6 +280,7 @@ function renderSettings() {
   $('#sNotify').checked = s.notify;
   $('#sCountry').value = s.country; $('#sGender').value = s.gender;
   $('#sMinAge').value = s.minAge; $('#sMaxAge').value = s.maxAge; $('#sPoll').value = String(s.pollMinutes);
+  syncSettingsView();
   renderHistory();
 }
 async function renderHistory() {
@@ -228,8 +290,11 @@ async function renderHistory() {
 }
 async function saveSettings() {
   const s = state.settings;
-  s.provider = $('#sProvider').value;
-  s.catchmailDomain = ($('#sCmDomain').value || 'catchmail.io').trim().toLowerCase();
+  s.provider = ui.provider;
+  s.catchmailDomain = ui.custom
+    ? ($('#sCmDomain').value || '').trim().toLowerCase().replace(/^@/, '')
+    : ui.domain;
+  if (!s.catchmailDomain) s.catchmailDomain = 'catchmail.io';
   s.dot = $('#sDot').checked; s.plus = $('#sPlus').checked;
   s.providers = { gmail: $('#pGmail').checked, outlook: $('#pOutlook').checked, hotmail: $('#pHotmail').checked, edu: $('#pEdu').checked };
   if (!s.providers.gmail && !s.providers.outlook && !s.providers.hotmail && !s.providers.edu) {
@@ -244,7 +309,7 @@ async function saveSettings() {
   const pollChanged = poll !== s.pollMinutes;
   s.pollMinutes = poll;
   await TM.saveSettings(s);
-  if (pollChanged) await TM.setupAlarm();
+  if (pollChanged) { await TM.setupAlarm(); try { chrome.runtime.sendMessage({ type: 'rearm' }); } catch (_) {} }
 }
 
 /* ---------- events ---------- */
@@ -278,6 +343,8 @@ $('#btnRegen').onclick = async () => { state.current = await TM.regenIdentity();
 $('#idBox').onclick = e => { const r = e.target.closest('[data-v]'); if (r) copy(r.dataset.v, 'Copied'); };
 
 $('#btnRefresh').onclick = () => refresh(true);
+$('#btnPause').onclick = () => setPaused(!state.paused);
+$('#btnResume').onclick = () => setPaused(false);
 $('#btnReadAll').onclick = async () => {
   await TM.markRead(state.messages.map(m => m.id));
   state.seen = await TM.getSeen(); renderList();
@@ -308,7 +375,29 @@ $('#btnBack').onclick = closeMessage;
 
 $('#btnSettings').onclick = () => { renderSettings(); show('settings'); };
 $('#btnBack2').onclick = () => { show(state.openId ? 'msg' : 'main'); };
-document.querySelectorAll('#view-settings input, #view-settings select').forEach(el => el.onchange = saveSettings);
+document.querySelectorAll('#view-settings input, #view-settings select').forEach(el => el.onchange = async () => { await saveSettings(); syncSettingsView(); });
+$('#sCmDomain').oninput = () => { clearTimeout(window._domT); window._domT = setTimeout(async () => { await saveSettings(); syncSettingsView(); }, 400); };
+$('#provSeg').onclick = async e => {
+  const b = e.target.closest('[data-provider]'); if (!b) return;
+  ui.provider = b.dataset.provider; await saveSettings(); syncSettingsView();
+};
+$('#domOpts').onclick = async e => {
+  const b = e.target.closest('[data-domain]'); if (!b) return;
+  if (b.dataset.domain === '__custom') { ui.custom = true; syncSettingsView(); $('#sCmDomain').focus(); }
+  else { ui.custom = false; ui.domain = b.dataset.domain; await saveSettings(); syncSettingsView(); }
+};
+$('#btnApply').onclick = async e => {
+  const b = e.currentTarget; b.disabled = true;
+  try {
+    await saveSettings();
+    state.current = await TM.newEmail();
+    state.messages = []; state.seen = new Set();
+    $('#emailErr').hidden = true;
+    renderEmail(); renderList(); syncSettingsView();
+    toast('New address: ' + state.current.email.split('@')[1]);
+  } catch (err) { toast(err.message); }
+  finally { b.disabled = false; }
+};
 $('#hist').onclick = async e => {
   const t = e.target;
   if (t.dataset.copyurl) return copy(t.dataset.copyurl, 'Copied');
@@ -318,5 +407,17 @@ $('#hist').onclick = async e => {
   }
 };
 
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area !== 'session' || !ch.inbox || !ch.inbox.newValue || !state.current) return;
+  const v = ch.inbox.newValue;
+  if (v.email !== state.current.email) return;
+  state.messages = v.messages;
+  TM.getSeen().then(seen => { state.seen = seen; if (state.openId === null) renderList(); });
+});
+
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area === 'local' && ch.paused && !!ch.paused.newValue !== state.paused) { state.paused = !!ch.paused.newValue; renderPause(); }
+});
+
 loadAll();
-setInterval(() => { if (state.openId === null && !$('#view-main').hidden) refresh(); }, 10000);
+setInterval(() => { if (!state.paused && state.openId === null && !$('#view-main').hidden) refresh(); }, 10000);
