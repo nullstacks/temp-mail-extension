@@ -19,7 +19,7 @@ Works in **Chrome** and **Brave** (Manifest V3). No account, no API keys, no bui
 
 ## Option A — download a release zip
 
-1. Download the latest release: **[github.com/nullstacks/temp-mail-extension/releases/latest](https://github.com/nullstacks/temp-mail-extension/releases/latest)** — grab the `*-webstore.zip` asset (e.g. `tempmail-v1.2.0-webstore.zip`).
+1. Download the latest release: **[github.com/nullstacks/temp-mail-extension/releases/latest](https://github.com/nullstacks/temp-mail-extension/releases/latest)** — grab the `.zip` asset attached to it.
 2. Unzip it. You should get a folder whose **root** contains `manifest.json`.
 3. Continue at [First launch](#first-launch).
 

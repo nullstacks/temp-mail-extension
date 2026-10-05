@@ -48,7 +48,7 @@ git clone https://github.com/nullstacks/temp-mail-extension.git
 
 Then open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode** → **Load unpacked** → select the cloned folder.
 
-Prefer a zip? Download the latest `*-webstore.zip` from [Releases](https://github.com/nullstacks/temp-mail-extension/releases/latest), unzip, and load that folder instead.
+Prefer a zip? Download the `.zip` attached to the [latest release](https://github.com/nullstacks/temp-mail-extension/releases/latest), unzip, and load that folder instead.
 
 > 📖 Full walkthrough — including updating, uninstalling and troubleshooting: **[INSTALL.md](INSTALL.md)**
 
