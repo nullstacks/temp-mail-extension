@@ -1,6 +1,6 @@
 # TempMail (Chrome / Brave, Manifest V3)
 
-Install: open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode** → **Load unpacked** → select this folder.
+Install: see **[INSTALL.md](INSTALL.md)** — or open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode** → **Load unpacked** → select this folder.
 
 Features
 - Same address persists across tabs, sessions and browser restarts until you press **Change**
