@@ -6,7 +6,7 @@
 
 **A persistent disposable inbox for Chrome & Brave — with one-click form autofill, OTP copy and zero setup.**
 
-[![Chrome](https://img.shields.io/badge/Chrome%20%2F%20Brave-MV3-4f46e5?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/concepts/manifest-v3)
+[![Chrome](https://img.shields.io/badge/Chrome%20%2F%20Brave-MV3-4f46e5?logo=googlechrome&logoColor=white)](#install)
 [![License: MIT](https://img.shields.io/badge/License-MIT-059669.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/nullstacks/temp-mail-extension?display_name=tag&sort=semver)](https://github.com/nullstacks/temp-mail-extension/releases/latest)
 [![No dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](#requirements)
