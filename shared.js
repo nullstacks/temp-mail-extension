@@ -199,8 +199,13 @@ const TM = (() => {
     dot: true,
     plus: true,
     providers: { catchmail: true, gmail: true, outlook: false, hotmail: false, edu: false },
-    provider: 'catchmail', // active provider: catchmail | temptf
+    provider: 'catchmail', // active provider: catchmail | temptf | mygmail
     catchmailDomain: 'catchmail.io',
+    // MyGmail (MailAPI): your own Gmail via mailapi.pushkarsingh4343.workers.dev
+    mygmailKey: '',
+    mygmailEmail: '',
+    mgPlus: true,
+    mgDot: false,
     eduToken: 'edu',
     showIcon: true,
     notify: true,
@@ -407,6 +412,88 @@ const TM = (() => {
     return p.toString();
   }
 
+  // MyGmail (MailAPI): reads your own Gmail through https://mailapi.pushkarsingh4343.workers.dev.
+  // One inbox, unlimited addresses: you+tag@gmail.com and y.o.u@gmail.com all land in your inbox, and the
+  // API filters the mailbox per address, so every signup address only sees its own mail.
+  const MG_ORIGIN = 'https://mailapi.pushkarsingh4343.workers.dev';
+  const MG_API = MG_ORIGIN + '/v1';
+  const isGmailDomain = d => /^(gmail|googlemail)\.com$/i.test(d || '');
+  const MG_EMAIL_RE = /^([^@\s]+)@([^@\s]+\.[^@\s]+)$/;
+
+  // Canonical "local@domain" of an address (no +tag; no dots on Gmail). '' when invalid.
+  function mgBase(email) {
+    const m = String(email || '').trim().toLowerCase().match(MG_EMAIL_RE);
+    if (!m) return '';
+    let local = m[1].split('+')[0];
+    if (isGmailDomain(m[2])) local = local.replace(/\./g, '');
+    return local ? local + '@' + m[2] : '';
+  }
+
+  // Randomised address from the user's own Gmail according to the two checkboxes.
+  function mgGenerate(email, { dot, plus }) {
+    const base = mgBase(email);
+    if (!base) throw new Error('Enter your Gmail address in Settings → MyGmail');
+    const [local0, domain] = base.split('@');
+    let local = local0;
+    if (dot && isGmailDomain(domain) && local.length > 1) {
+      let out = local;
+      for (let i = 0; i < 30; i++) { // each gap gets a dot at random; make sure at least one is set
+        out = '';
+        for (let j = 0; j < local.length; j++) { out += local[j]; if (j < local.length - 1 && rnd(2)) out += '.'; }
+        if (out.includes('.')) break;
+      }
+      local = out;
+    }
+    if (plus) local += '+' + Array.from({ length: 7 }, () => 'abcdefghjkmnpqrstuvwxyz23456789'[rnd(31)]).join('');
+    return local + '@' + domain;
+  }
+
+  async function mgFetch(path, opts = {}) {
+    const s = await getSettings();
+    if (!s.mygmailKey) throw new Error('Add your MailAPI key in Settings → MyGmail');
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    let r;
+    try {
+      r = await fetch(MG_API + path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + s.mygmailKey }, signal: ctrl.signal });
+    } catch (e) {
+      let granted = true;
+      try { granted = await chrome.permissions.contains({ origins: [MG_ORIGIN + '/*'] }); } catch (_) {}
+      throw new Error(!granted ? 'Allow access to MailAPI in Settings → MyGmail'
+        : e.name === 'AbortError' ? 'MailAPI timed out' : 'Could not reach MailAPI');
+    } finally { clearTimeout(t); }
+    if (!r.ok) {
+      let msg = '';
+      try { const j = await r.json(); msg = typeof j.error === 'string' ? j.error : (j.error && j.error.message) || j.message || ''; } catch (_) {}
+      const e = new Error(
+        r.status === 401 ? (msg || 'Invalid MailAPI key. Check it in Settings → MyGmail')
+        : r.status === 404 ? (msg || "That address isn't linked to your MailAPI account")
+        : r.status === 429 ? 'Gmail quota reached. Try again shortly'
+        : (msg || `MailAPI error ${r.status}`));
+      e.status = r.status;
+      throw e;
+    }
+    return r;
+  }
+
+  const mgMessage = d => ({
+    id: String(d.id), from: d.from, subject: d.subject, date: d.date,
+    body: d.html || d.text || '', bodyContentType: d.html ? 'html' : 'text',
+    attachments: (d.attachments || []).map(a => ({ id: a.id, name: a.filename, contentType: a.mimeType, size: a.size })),
+    inlineCids: {}
+  });
+  const mgFetchDetail = async (email, id) =>
+    mgMessage(await (await mgFetch('/messages/' + encodeURIComponent(id) + '?email=' + encodeURIComponent(email))).json());
+
+  // Settings → "Test connection": validates the key and that the address belongs to the account
+  async function mgTest() {
+    const s = await getSettings();
+    const j = await (await mgFetch('/me')).json();
+    const linked = (j.linked_accounts && j.linked_accounts.length ? j.linked_accounts : [j.email]).filter(Boolean);
+    const base = mgBase(s.mygmailEmail);
+    return { email: j.email, linked, ok: !!base && linked.some(a => mgBase(a) === base) };
+  }
+
   // Catchmail (catchmail.io): open API, any address works on catchmail.io or a
   // custom domain (MX -> smtp.catchmail.io). Mailboxes are create-only — there's
   // no endpoint to list an existing random address, so we generate a persistent
@@ -434,8 +521,14 @@ const TM = (() => {
   });
   const cmRandom = () => 'mx' + Array.from({ length: 10 }, () => 'abcdefghjkmnpqrstuvwxyz23456789'[rnd(31)]).join('') + Date.now().toString(36).slice(-4);
 
+  const activeProvider = s => (s.provider === 'catchmail' || s.provider === 'mygmail' ? s.provider : 'temptf');
+
   async function requestAccount(s) {
-    const active = s.provider === 'catchmail' ? 'catchmail' : 'temptf';
+    const active = activeProvider(s);
+    if (active === 'mygmail') {
+      if (!s.mygmailKey) throw new Error('Add your MailAPI key in Settings → MyGmail');
+      return mgGenerate(s.mygmailEmail, { dot: s.mgDot, plus: s.mgPlus });
+    }
     if (active === 'catchmail') {
       const dom = (s.catchmailDomain || CM_DOMAIN_DEFAULT).trim().toLowerCase();
       if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(dom)) throw new Error('Invalid catchmail domain');
@@ -482,7 +575,7 @@ const TM = (() => {
       const s = await getSettings();
       const email = await requestAccount(s);
       const { current, history = [] } = await store.get(['current', 'history']);
-      const cur = { email, createdAt: Date.now(), identity: makeIdentity(s) };
+      const cur = { email, provider: activeProvider(s), createdAt: Date.now(), identity: makeIdentity(s) };
       let h = history.filter(x => x.email !== email);
       if (current) h = [current, ...h.filter(x => x.email !== current.email)];
       await store.set({ current: cur, history: h.slice(0, 5) });
@@ -539,7 +632,13 @@ const TM = (() => {
     });
   }
 
+  // The stored provider wins; addresses saved by older versions are inferred from the domain.
   const isTempTfAddr = e => /@(gmail|outlook|hotmail)\.com$/i.test(e || '') || /@[\w.-]*edu\.pl$/i.test(e || '');
+  const providerOf = cur => (cur && cur.provider) || (isTempTfAddr(cur && cur.email) ? 'temptf' : 'catchmail');
+  async function providerFor(email) {
+    const { current, history = [] } = await store.get(['current', 'history']);
+    return providerOf([current, ...history].find(x => x && x.email === email) || { email });
+  }
   const byNewest = (a, b) => new Date(b.date) - new Date(a.date);
 
   async function cmFetchDetail(email, id) {
@@ -556,7 +655,8 @@ const TM = (() => {
   }
   // Full body for a message that the list only returned metadata for (used by the popup on open)
   async function loadMessage(email, id) {
-    return isTempTfAddr(email) ? null : cmFetchDetail(email, id);
+    const p = await providerFor(email);
+    return p === 'mygmail' ? mgFetchDetail(email, id) : p === 'catchmail' ? cmFetchDetail(email, id) : null;
   }
 
   const MIN_GAP_MS = 1500;   // popup + service worker + alarm share one result inside this window
@@ -583,7 +683,19 @@ const TM = (() => {
 
     let list;
     try {
-      if (isTempTfAddr(cur.email)) {
+      const prov = providerOf(cur);
+      if (prov === 'mygmail') {
+        // cheap poll: ids only (1 Gmail call); full messages are fetched once, only for ids we haven't seen
+        const ids = ((await (await mgFetch('/messages?email=' + encodeURIComponent(cur.email) + '&maxResults=25&ids_only=1')).json()).messages || []).map(m => String(m.id));
+        const old = new Map(prevOk ? prev.messages.map(m => [m.id, m]) : []);
+        const fetchIds = ids.filter(id => !old.has(id)).slice(0, 6); // the rest are picked up on the next poll
+        const got = new Map();
+        await Promise.all(fetchIds.map(async id => {
+          try { got.set(id, await mgFetchDetail(cur.email, id)); }
+          catch (e) { if (e.status === 429 || e.status === 401) throw e; /* e.g. deleted meanwhile: skip */ }
+        }));
+        list = ids.map(id => old.get(id) || got.get(id)).filter(Boolean);
+      } else if (prov === 'temptf') {
         const r = await apiFetch('/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -663,9 +775,12 @@ const TM = (() => {
     `${API}/attachment?email=${encodeURIComponent(email)}&messageId=${encodeURIComponent(messageId)}&attachmentId=${encodeURIComponent(attachmentId)}`;
 
   async function fetchAttachment(email, messageId, attachmentId) {
-    // catchmail messages carry a relative download_url on the catchmail API
-    const isCm = !/@(gmail|outlook|hotmail)\.com$/i.test(email) && !/@[\w.-]*edu\.pl$/i.test(email);
-    if (isCm) {
+    const p = await providerFor(email);
+    if (p === 'mygmail') {
+      const r = await mgFetch(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}?email=${encodeURIComponent(email)}`);
+      return r.blob();
+    }
+    if (p === 'catchmail') {
       const r = await cmApiFetch(`/attachment/${encodeURIComponent(messageId)}/${encodeURIComponent(attachmentId)}?mailbox=${encodeURIComponent(email)}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.blob();
@@ -753,7 +868,7 @@ const TM = (() => {
   }
 
   return {
-    DEFAULTS, CM_DOMAINS, getSettings, saveSettings, newEmail, ensureEmail, useAddress, regenIdentity,
+    DEFAULTS, CM_DOMAINS, MG_ORIGIN, providerOf, mgBase, mgGenerate, mgTest, getSettings, saveSettings, newEmail, ensureEmail, useAddress, regenIdentity,
     refreshInbox, loadMessage, boost, isPaused, setPaused, getSeen, markRead, setBadge, attachmentUrl, fetchAttachment,
     autofill, fillFocused, setupAlarm, armFastLoop, stopFastLoop, genPassword, makeIdentity
   };

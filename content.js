@@ -19,10 +19,10 @@
 
   /* ---------- overlay (created lazily, closed shadow root so page CSS/JS can't touch it) ---------- */
   const CSS = `button{all:initial;position:fixed;top:0;left:0;width:${SIZE}px;height:${SIZE}px;border-radius:50%;
-      background:#4f46e5;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;pointer-events:auto;
+      background:#0071e3;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;pointer-events:auto;
       display:none;align-items:center;justify-content:center;opacity:.92;transition:transform .12s,opacity .12s,background .2s}
     button:hover{opacity:1;filter:brightness(1.12)}
-    button.ok{background:#059669}
+    button.ok{background:#248a3d}
     svg{width:13px;height:13px;pointer-events:none}`;
   let sheet = null;
   function ensureHost() {

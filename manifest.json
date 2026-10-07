@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TempMail — Disposable Email",
-  "version": "1.3.2",
-  "description": "Persistent disposable email with inbox, notifications, OTP detection and one-click form autofill. Catchmail.io + temp.tf.",
+  "version": "1.5.1",
+  "description": "Persistent disposable email with inbox, notifications, OTP detection and one-click form autofill. Catchmail.io, temp.tf and MyGmail (your own Gmail aliases).",
   "permissions": [
     "storage",
     "alarms",
@@ -58,5 +58,8 @@
       "all_frames": true,
       "run_at": "document_idle"
     }
+  ],
+  "optional_host_permissions": [
+    "https://mailapi.pushkarsingh4343.workers.dev/*"
   ]
 }

@@ -47,7 +47,7 @@ Keep the original folder in place — loaded-unpacked extensions run from it. Do
 - Click the toolbar icon → the popup shows an inbox. An address is **created automatically the first time you open it** — no signup.
 - Press **Copy** to copy the address, or just fill a login form: the mini icon inside email fields fills them (read the [README](README.md) for the full feature list).
 - Press **Change** to get a fresh address. Old addresses are kept in the popup's history (last 5) and can be switched back to.
-- Prefer a different mail service? Settings → switch between **Catchmail** (catchmail.io / mailistry.com / zeppost.com, or your own domain via MX) and **temp.tf**. Provider changes apply to the *next* address; press **Get new address now** to apply immediately.
+- Prefer a different mail service? Settings → switch between **Catchmail** (catchmail.io / mailistry.com / zeppost.com, or your own domain via MX), **temp.tf**, and **MyGmail** (your own Gmail via +aliases and dot variants — needs a free [MailAPI](https://mailapi.pushkarsingh4343.workers.dev/) account and key; see the [README](README.md#mygmail-setup)). Provider changes apply to the *next* address; press **Get new address now** to apply immediately.
 - The **⏸** button stops background polling and notifications until you resume.
 
 Keyboard shortcuts: `Alt+Shift+F` — autofill the current page's form, `Alt+Shift+M` — open the popup. (Change them at `chrome://extensions/shortcuts`.)
