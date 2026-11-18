@@ -43,6 +43,10 @@ Most temp-mail sites make you refresh a page and fight CAPTCHAs. TempMail lives 
 
 ## Screenshots
 
+**[▶ Watch the 23-second launch video](docs/media/launch.mp4)**
+
+[![Temp Mail — launch video](docs/media/poster.jpg)](docs/media/launch.mp4)
+
 | Popup | Settings · MyGmail | Settings · Autofill & Inbox |
 |:---:|:---:|:---:|
 | <img src=".github/assets/screenshot-inbox.png" alt="TempMail popup showing the current MyGmail address, Autofill form / Copy / New actions, the fake identity row and a live inbox with an unread message and a one-click OTP code chip" width="360"> | <img src=".github/assets/screenshot-settings.png" alt="TempMail settings, MyGmail tab: segmented provider switcher (Catchmail / temp.tf / MyGmail), MailAPI signup info, masked API key field, plus-alias and Gmail dot-variant toggles" width="360"> | <img src=".github/assets/screenshot-settings-2.png" alt="TempMail settings, second page: autofill toggles for icon, identity and passwords, fake-identity country, gender and age range, desktop notifications and poll interval" width="360"> |
