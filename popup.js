@@ -160,9 +160,11 @@ function renderList() {
     return `<li class="row${state.seen.has(m.id) ? '' : ' unread'}" data-id="${esc(m.id)}">
       <span class="dot"></span>
       <div class="li-body">
-        <div class="li-top"><span class="from">${esc(senderName(m.from))}</span><span class="time">${esc(ago(m.date))}</span></div>
-        <div class="subj">${esc(m.subject || '(no subject)')}</div>
-        <div class="snip">${esc(bodyText(m).slice(0, 110))}</div>
+        <button class="message-open" type="button">
+          <span class="li-top"><span class="from">${esc(senderName(m.from))}</span><span class="time">${esc(ago(m.date))}</span></span>
+          <span class="subj">${esc(m.subject || '(no subject)')}</span>
+          <span class="snip">${esc(bodyText(m).slice(0, 110))}</span>
+        </button>
         ${chips ? `<div class="codes">${chips}</div>` : ''}
       </div></li>`;
   }).join('');
@@ -250,6 +252,7 @@ async function openMessage(id) {
   if (!m) return;
   state.openId = id; state.images = false;
   show('msg');
+  $('#btnBack').focus();
   $('#mSubject').textContent = m.subject || '(no subject)';
   $('#mFrom').textContent = 'From: ' + (m.from || 'unknown');
   $('#mDate').textContent = m.date ? new Date(m.date).toLocaleString() : '';
@@ -271,10 +274,13 @@ async function openMessage(id) {
 }
 
 function closeMessage() {
+  const id = state.openId;
   state.openId = null;
   $('#mFrame').srcdoc = '';
   show('main');
   renderList();
+  const row = Array.from($('#list').children).find(el => el.dataset.id === id);
+  (row?.querySelector('.message-open') || $('#btnRefresh')).focus();
 }
 
 /* ---------- settings ---------- */
@@ -323,9 +329,11 @@ function syncMgView() {
     ? 'Both off: your plain address is used, so this popup shows your whole inbox.'
     : 'Every new address is randomised from your email and lands in the same inbox. Only mail sent to that exact address appears here.';
 }
-const MG_PERM = () => ({ origins: [TM.MG_ORIGIN + '/*'] });
 // Needs a user gesture: call it first thing inside a click handler
-async function ensureMgAccess() { try { return await chrome.permissions.request(MG_PERM()); } catch (_) { return false; } }
+async function ensureMgAccess() {
+  try { return await chrome.permissions.request({ origins: [TM.MG_ORIGIN + '/*'] }); }
+  catch (_) { return false; }
+}
 
 function renderSettings() {
   const s = state.settings;
@@ -441,8 +449,11 @@ $('#view-msg').onclick = async e => {
 $('#btnImgs').onclick = () => { state.images = true; renderFrame(state.messages.find(x => x.id === state.openId)); };
 $('#btnBack').onclick = closeMessage;
 
-$('#btnSettings').onclick = () => { renderSettings(); show('settings'); };
-$('#btnBack2').onclick = () => { show(state.openId ? 'msg' : 'main'); };
+$('#btnSettings').onclick = () => { renderSettings(); show('settings'); $('#btnBack2').focus(); };
+$('#btnBack2').onclick = () => {
+  show(state.openId ? 'msg' : 'main');
+  $(state.openId ? '#btnBack' : '#btnSettings').focus();
+};
 document.querySelectorAll('#view-settings input, #view-settings select').forEach(el => el.onchange = async () => { await saveSettings(); syncMgView(); syncSettingsView(); });
 $('#sCmDomain').oninput = () => { clearTimeout(window._domT); window._domT = setTimeout(async () => { await saveSettings(); syncSettingsView(); }, 400); };
 $('#provSeg').onclick = async e => {
@@ -480,18 +491,47 @@ $('#btnMgEye').onclick = e => {
   e.currentTarget.innerHTML = ic(show ? 'eye-off' : 'eye');
   e.currentTarget.title = e.currentTarget.ariaLabel = show ? 'Hide key' : 'Show key';
 };
-$('#btnMgTest').onclick = async e => {
-  const b = e.currentTarget; b.disabled = true;
-  setMgStatus('Checking…', '');
+async function checkMgAccount(fillEmail) {
+  const key = $('#sMgKey'), email = $('#sMgEmail');
+  const config = { mygmailKey: key.value.trim(), mygmailEmail: email.value.trim() };
+  if (!config.mygmailKey) {
+    setMgStatus('Enter your MailAPI key first.', 'bad');
+    key.focus();
+    return;
+  }
+  const stillCurrent = () => ui.provider === 'mygmail'
+    && key.value.trim() === config.mygmailKey && email.value.trim() === config.mygmailEmail;
+  const fetchButton = $('#btnMgFetch'), testButton = $('#btnMgTest');
+  fetchButton.disabled = testButton.disabled = true;
+  setMgStatus(fillEmail ? 'Fetching Gmail address…' : 'Checking…', '');
   try {
-    if (!(await ensureMgAccess())) throw new Error('Allow access to MailAPI to test the connection');
-    await saveSettings();
-    const r = await TM.mgTest();
-    if (r.ok) setMgStatus(`Connected as ${r.email}. This address is ready to use.`, 'ok');
-    else setMgStatus(`Your key works, but ${$('#sMgEmail').value.trim() || 'that address'} isn't linked to it. Linked: ${r.linked.join(', ')}.`, 'bad');
-  } catch (err) { setMgStatus(err.message, 'bad'); }
-  finally { b.disabled = false; }
-};
+    if (!(await ensureMgAccess())) throw new Error('Allow access to MailAPI to continue.');
+    if (!stillCurrent()) return;
+    if (!fillEmail) await saveSettings();
+    const r = await TM.mgTest(config);
+    if (!stillCurrent()) return;
+    if (fillEmail) {
+      const address = r.email || r.linked[0];
+      if (!address) throw new Error('No Gmail address is linked to this key.');
+      email.value = address;
+      config.mygmailEmail = address;
+      syncMgView();
+      await saveSettings();
+      syncSettingsView();
+      if (stillCurrent()) setMgStatus('Gmail address filled in.', 'ok');
+    } else if (r.ok) {
+      setMgStatus(`Connected as ${r.email || config.mygmailEmail}. This address is ready to use.`, 'ok');
+    } else {
+      setMgStatus(r.linked.length ? `Choose a linked address: ${r.linked.join(', ')}.` : 'No Gmail address is linked to this key.', 'bad');
+    }
+  } catch (err) {
+    if (stillCurrent()) setMgStatus(err.message, 'bad');
+  } finally {
+    fetchButton.disabled = testButton.disabled = false;
+  }
+}
+$('#btnMgFetch').onclick = () => checkMgAccount(true);
+$('#btnMgTest').onclick = () => checkMgAccount(false);
 $('#hist').onclick = async e => {
   const t = e.target.closest('[data-use],[data-copyurl]'); if (!t) return;
   if (t.dataset.copyurl) return copy(t.dataset.copyurl, 'Copied');

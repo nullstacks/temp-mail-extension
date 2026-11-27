@@ -9,7 +9,7 @@
 [![Chrome](https://img.shields.io/badge/Chrome%20%2F%20Brave-MV3-4f46e5?logo=googlechrome&logoColor=white)](#install)
 [![License: MIT](https://img.shields.io/badge/License-MIT-059669.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/nullstacks/temp-mail-extension?display_name=tag&sort=semver)](https://github.com/nullstacks/temp-mail-extension/releases/latest)
-[![Version](https://img.shields.io/badge/version-1.5.1-4f46e5)](#whats-new-in-151)
+[![Version](https://img.shields.io/badge/version-1.5.1-4f46e5)](#recent-changes)
 [![No dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](#requirements)
 
 **[Install](INSTALL.md)** · **[Features](#features)** · **[Screenshots](#screenshots)** · **[Releases](https://github.com/nullstacks/temp-mail-extension/releases)**
@@ -18,7 +18,7 @@
 
 ---
 
-Most temp-mail sites make you refresh a page and fight CAPTCHAs. TempMail lives in your browser: a real inbox that polls in the background, fills any signup form in one keystroke, and keeps the same address for as long as you want it — until you press **New**. No account, no API keys, no build step.
+TempMail gives Chrome and Brave a disposable inbox that checks for mail in the background. Copy your address, autofill signup forms, and pull verification codes from incoming mail. Your address stays the same until you press **New**. Catchmail and temp.tf work without an account or API key.
 
 ## Features
 
@@ -31,26 +31,19 @@ Most temp-mail sites make you refresh a page and fight CAPTCHAs. TempMail lives 
 - **Safe message viewer** — sandboxed iframe, remote images blocked until you allow them, attachments downloadable
 - **Privacy controls** — pause button (⏸) stops all background checks, wake-ups and notifications until you resume; address history (last 5)
 - **Three mail providers** — Catchmail (3 domains + custom domains via MX), temp.tf, and **MyGmail**: your own Gmail via +aliases and dot variants, switchable in Settings
-- **Native-feeling design** — clean system-font UI in the spirit of Apple's Passwords and Notes: grouped lists, automatic light/dark, honest waiting states, visible focus
+- **Light and dark themes** — follows your system setting, with visible focus and keyboard navigation through inbox messages
 
-## What's new in 1.5.1
+## Recent changes
 
-- **MyGmail provider** — use your own Gmail as the disposable address: `you+tag@gmail.com` (+aliases) or `y.o.u@gmail.com` (dot variants), filtered per address through [MailAPI](https://mailapi.pushkarsingh4343.workers.dev/). Key stays in local storage; the MailAPI host is an *optional* permission granted only when you pick MyGmail. See [MyGmail setup](#mygmail-setup).
-- **Pause button** — ⏸ in the popup header halts all automatic polling, alarms, wake-ups and notifications; ↻ still refreshes manually, and resuming catches up immediately.
-- **Redesigned popup** — the toolbar popup was rebuilt as a clean, native-feeling utility: system typography, inset grouped lists with hairline separators, native-style switches / segmented controls / pop-up menus, semantic colours and automatic light/dark. Autofill is the primary action; the inbox leads each message with its code. No web fonts or remote assets — the popup never makes a request of its own.
-- **Popup that fits its content** — the height always matches what's shown, up to Chrome's 600 px cap: short with an empty inbox, growing as mail or panels arrive.
-- Refreshed toolbar icon set.
+- **MyGmail setup** now uses Nullstacks MailAPI. **Fetch Gmail address** fills in the Gmail address associated with your API key. [Setup instructions](#mygmail-setup)
+- **Compact address card** puts **Copy** first, with **Autofill** and **New** alongside it.
+- **Keyboard navigation** lets you open inbox messages with Enter or Space. Going back returns focus to the message you opened.
 
 ## Screenshots
 
-**[▶ Watch the 23-second launch video](docs/media/launch.mp4)**
-
-[![Temp Mail — launch video](docs/media/poster.jpg)](docs/media/launch.mp4)
-
-| Popup | Settings · MyGmail | Settings · Autofill & Inbox |
+| Empty inbox in light mode | Verification code in dark mode | MyGmail settings |
 |:---:|:---:|:---:|
-| <img src=".github/assets/screenshot-inbox.png" alt="TempMail popup showing the current MyGmail address, Autofill form / Copy / New actions, the fake identity row and a live inbox with an unread message and a one-click OTP code chip" width="360"> | <img src=".github/assets/screenshot-settings.png" alt="TempMail settings, MyGmail tab: segmented provider switcher (Catchmail / temp.tf / MyGmail), MailAPI signup info, masked API key field, plus-alias and Gmail dot-variant toggles" width="360"> | <img src=".github/assets/screenshot-settings-2.png" alt="TempMail settings, second page: autofill toggles for icon, identity and passwords, fake-identity country, gender and age range, desktop notifications and poll interval" width="360"> |
-| *Address, identity, live inbox with OTP chip* | *MyGmail: API key, alias & dot-variant toggles* | *Autofill, identity, notification preferences* |
+| <img src=".github/assets/screenshot-popup.png" alt="Light mode popup with Copy, Autofill, New, and an empty inbox" width="300"> | <img src=".github/assets/screenshot-inbox.png" alt="Dark mode inbox with a sample verification code and its copy button" width="300"> | <img src=".github/assets/screenshot-settings.png" alt="MyGmail settings showing a masked sample key, a filled Gmail address, and the Fetch Gmail address button" width="300"> |
 
 ## Install
 
@@ -62,7 +55,7 @@ git clone https://github.com/nullstacks/temp-mail-extension.git
 
 Then open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode** → **Load unpacked** → select the cloned folder.
 
-Prefer a zip? Download the `.zip` attached to the [latest release](https://github.com/nullstacks/temp-mail-extension/releases/latest), unzip, and load that folder instead.
+Prefer a zip? Download the `.zip` attached to the [latest release](https://github.com/nullstacks/temp-mail-extension/releases/latest), unzip, and load that folder instead. Use the source install above for the latest MyGmail changes.
 
 > 📖 Full walkthrough — including updating, uninstalling and troubleshooting: **[INSTALL.md](INSTALL.md)**
 
@@ -70,12 +63,12 @@ Prefer a zip? Download the `.zip` attached to the [latest release](https://githu
 
 Optional provider — the default Catchmail/temp.tf flow needs no account and no keys.
 
-1. Create an account at [mailapi.pushkarsingh4343.workers.dev](https://mailapi.pushkarsingh4343.workers.dev/) and link your Gmail there. Gmail delivers `you+anything@gmail.com` and `y.o.u@gmail.com` to your normal inbox; MailAPI filters the mailbox per address, so each signup address only shows its own mail.
-2. In the extension: Settings → **MyGmail** → paste the API key and the same Gmail address, then press **Test connection**.
+1. Create an account at [mailapi.nullstacks.workers.dev](https://mailapi.nullstacks.workers.dev/) and link your Gmail there. Gmail delivers `you+anything@gmail.com` and `y.o.u@gmail.com` to your normal inbox; MailAPI filters the mailbox per address, so each signup address only shows its own mail.
+2. In the extension: Settings → **MyGmail** → paste the API key and choose **Fetch Gmail address**. You can also enter a linked address manually and choose **Test connection**.
 3. Pick the address style: **+ alias** (`you+k3x9qm2@gmail.com`), **dot variant** (`y.ou@gmail.com`), or both. Both off uses your plain address and shows your whole inbox.
 4. Press **New** for a freshly randomised address.
 
-Notes: access to the MailAPI host is requested the first time you pick MyGmail (optional permission — other providers never need it). The API key is stored in `chrome.storage.local` on this browser only. Polling is cheap: an ids-only request each check, and a message is downloaded once, only when it is new. Each saved address remembers its provider, so a `@gmail.com` address from temp.tf and one from MyGmail are never confused.
+If you're upgrading from the old MailAPI server, reload the extension and enter your API key again. MyGmail asks for permission to connect to MailAPI. Your saved key stays in this browser's local storage and is sent to MailAPI to authenticate requests.
 
 ## How it works
 
@@ -103,7 +96,7 @@ Notes: access to the MailAPI host is requested the first time you pick MyGmail (
 - Everything (address, inbox, history, settings) is stored **locally** in your browser
 - No analytics, no trackers, no telemetry, no third-party requests beyond the mail providers you pick
 - Catchmail mailboxes are anonymous and create-only; custom domains stay private (unreadable to others)
-- MyGmail: the API key never leaves this browser's `chrome.storage.local`; mail flows through your own MailAPI account
+- MyGmail: the API key is stored in `chrome.storage.local` and sent only to MailAPI to authenticate requests
 - Fake identities are randomly generated — for testing and privacy only, never for impersonation
 
 ## Contributing

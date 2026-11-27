@@ -60,6 +60,6 @@
     }
   ],
   "optional_host_permissions": [
-    "https://mailapi.pushkarsingh4343.workers.dev/*"
+    "https://mailapi.nullstacks.workers.dev/*"
   ]
 }

@@ -201,7 +201,8 @@ const TM = (() => {
     providers: { catchmail: true, gmail: true, outlook: false, hotmail: false, edu: false },
     provider: 'catchmail', // active provider: catchmail | temptf | mygmail
     catchmailDomain: 'catchmail.io',
-    // MyGmail (MailAPI): your own Gmail via mailapi.pushkarsingh4343.workers.dev
+    // MyGmail (MailAPI): only keys saved for Nullstacks can be used with it.
+    mygmailHost: 'nullstacks',
     mygmailKey: '',
     mygmailEmail: '',
     mgPlus: true,
@@ -353,6 +354,8 @@ const TM = (() => {
     if (!settingsCache) {
       const { settings } = await store.get('settings');
       settingsCache = { ...DEFAULTS, ...(settings || {}), providers: { ...DEFAULTS.providers, ...((settings && settings.providers) || {}) } };
+      if (settings?.mygmailHost !== DEFAULTS.mygmailHost) settingsCache.mygmailKey = '';
+      settingsCache.mygmailHost = DEFAULTS.mygmailHost;
     }
     return { ...settingsCache, providers: { ...settingsCache.providers } };
   }
@@ -412,11 +415,10 @@ const TM = (() => {
     return p.toString();
   }
 
-  // MyGmail (MailAPI): reads your own Gmail through https://mailapi.pushkarsingh4343.workers.dev.
+  // MyGmail (MailAPI): reads your own Gmail through the Nullstacks deployment.
   // One inbox, unlimited addresses: you+tag@gmail.com and y.o.u@gmail.com all land in your inbox, and the
   // API filters the mailbox per address, so every signup address only sees its own mail.
-  const MG_ORIGIN = 'https://mailapi.pushkarsingh4343.workers.dev';
-  const MG_API = MG_ORIGIN + '/v1';
+  const MG_ORIGIN = 'https://mailapi.nullstacks.workers.dev';
   const isGmailDomain = d => /^(gmail|googlemail)\.com$/i.test(d || '');
   const MG_EMAIL_RE = /^([^@\s]+)@([^@\s]+\.[^@\s]+)$/;
 
@@ -448,14 +450,14 @@ const TM = (() => {
     return local + '@' + domain;
   }
 
-  async function mgFetch(path, opts = {}) {
-    const s = await getSettings();
+  async function mgFetch(path, s) {
+    s ||= await getSettings();
     if (!s.mygmailKey) throw new Error('Add your MailAPI key in Settings → MyGmail');
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 20000);
     let r;
     try {
-      r = await fetch(MG_API + path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + s.mygmailKey }, signal: ctrl.signal });
+      r = await fetch(MG_ORIGIN + '/v1' + path, { headers: { Authorization: 'Bearer ' + s.mygmailKey }, redirect: 'error', signal: ctrl.signal });
     } catch (e) {
       let granted = true;
       try { granted = await chrome.permissions.contains({ origins: [MG_ORIGIN + '/*'] }); } catch (_) {}
@@ -486,12 +488,13 @@ const TM = (() => {
     mgMessage(await (await mgFetch('/messages/' + encodeURIComponent(id) + '?email=' + encodeURIComponent(email))).json());
 
   // Settings → "Test connection": validates the key and that the address belongs to the account
-  async function mgTest() {
-    const s = await getSettings();
-    const j = await (await mgFetch('/me')).json();
-    const linked = (j.linked_accounts && j.linked_accounts.length ? j.linked_accounts : [j.email]).filter(Boolean);
+  async function mgTest(s) {
+    const j = await (await mgFetch('/me', s)).json();
+    const email = mgBase(j.email) ? j.email : '';
+    const accounts = Array.isArray(j.linked_accounts) ? j.linked_accounts.filter(a => mgBase(a)) : [];
+    const linked = accounts.length ? accounts : (email ? [email] : []);
     const base = mgBase(s.mygmailEmail);
-    return { email: j.email, linked, ok: !!base && linked.some(a => mgBase(a) === base) };
+    return { email, linked, ok: !!base && linked.some(a => mgBase(a) === base) };
   }
 
   // Catchmail (catchmail.io): open API, any address works on catchmail.io or a

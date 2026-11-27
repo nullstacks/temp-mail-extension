@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Temp Mail</title>
   <link rel="stylesheet" href="popup.css">
@@ -36,7 +37,10 @@
   <!-- MAIN -->
   <main id="view-main">
     <div class="bar">
-      <h1 class="bar-title">Temp Mail</h1>
+      <div class="brand">
+        <img src="icons/icon32.png" alt="" width="28" height="28">
+        <h1 class="bar-title">Temp Mail</h1>
+      </div>
       <div class="bar-actions">
         <button id="btnPause" class="icon-btn" title="Pause auto-check" aria-label="Pause auto-check"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg></button>
         <button id="btnRefresh" class="icon-btn" title="Check for mail" aria-label="Check for mail"><svg class="ic" aria-hidden="true"><use href="#i-refresh-cw"/></svg></button>
@@ -45,13 +49,13 @@
     </div>
 
     <div class="body">
-      <section class="group address" aria-label="Your temporary address">
-        <div id="email" class="addr" role="button" tabindex="0" title="Click to copy">Loading…</div>
+      <section class="group address" aria-label="Temporary address">
+        <button id="email" class="addr" type="button" title="Copy address">Loading…</button>
         <div id="provLine" class="sub"></div>
         <div id="emailErr" class="err" role="alert" hidden></div>
         <div class="actions">
-          <button id="btnFill" class="btn primary"><svg class="ic" aria-hidden="true"><use href="#i-text-cursor-input"/></svg><span class="lbl">Autofill form</span></button>
-          <button id="btnCopy" class="btn secondary" title="Copy address" aria-label="Copy address"><svg class="ic i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="ic i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="lbl">Copy</span></button>
+          <button id="btnCopy" class="btn primary" title="Copy address" aria-label="Copy address"><svg class="ic i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="ic i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="lbl">Copy</span></button>
+          <button id="btnFill" class="btn secondary" title="Autofill form"><svg class="ic" aria-hidden="true"><use href="#i-text-cursor-input"/></svg><span class="lbl">Autofill</span></button>
           <button id="btnNew" class="btn secondary" title="New address" aria-label="New address"><svg class="ic" aria-hidden="true"><use href="#i-shuffle"/></svg><span class="lbl">New</span></button>
         </div>
       </section>
@@ -71,12 +75,12 @@
           <h2>Inbox</h2>
           <div class="sub"><span id="count"></span><span id="updated"></span></div>
         </div>
-        <button id="btnReadAll" class="link">Mark all read</button>
+        <button id="btnReadAll" class="link" hidden>Mark all read</button>
       </div>
       <div id="status" class="alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-triangle-alert"/></svg><span id="statusText"></span></div>
       <ul id="list" class="group list"></ul>
       <div id="empty" class="empty" hidden>
-        <svg class="ic big" aria-hidden="true"><use href="#i-mail"/></svg>
+        <span class="empty-icon"><svg class="ic" aria-hidden="true"><use href="#i-mail"/></svg></span>
         <div class="t">No mail yet</div>
         <div class="d">Verification codes and links appear here as soon as they arrive.</div>
       </div>
@@ -111,7 +115,8 @@
     </div>
     <div class="body set">
 
-      <div class="seg" id="provSeg" role="radiogroup" aria-label="Email provider">
+      <h2 class="glabel provider-label" id="providerLabel">Email provider</h2>
+      <div class="seg" id="provSeg" role="radiogroup" aria-labelledby="providerLabel">
         <button type="button" class="seg-btn" role="radio" data-provider="catchmail">Catchmail</button>
         <button type="button" class="seg-btn" role="radio" data-provider="temptf">temp.tf</button>
         <button type="button" class="seg-btn" role="radio" data-provider="mygmail">MyGmail</button>
@@ -133,11 +138,12 @@
 
       <!-- MyGmail only -->
       <section id="secMygmail">
-        <div class="info"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><p>MyGmail uses your own Gmail through MailAPI. Create an account at <a id="mgSignup" href="https://mailapi.pushkarsingh4343.workers.dev/" target="_blank" rel="noopener">mailapi.pushkarsingh4343.workers.dev</a>, link your Gmail there, then paste the API key and the same address below.</p></div>
+        <div class="info"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><p>Link your Gmail in the <a id="mgSignup" href="https://mailapi.nullstacks.workers.dev/" target="_blank" rel="noopener">MailAPI dashboard</a>, then paste your API key and choose Fetch Gmail address.</p></div>
         <h3 class="glabel">Account</h3>
         <div class="group">
           <div class="row fld"><label for="sMgKey" class="k">API key</label><input type="password" id="sMgKey" class="plain mono" placeholder="gmk_…" autocomplete="off" spellcheck="false"><button type="button" id="btnMgEye" class="icon-btn sm" title="Show key" aria-label="Show key"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg></button></div>
           <div class="row fld"><label for="sMgEmail" class="k">Email</label><input type="email" id="sMgEmail" class="plain" placeholder="you@gmail.com" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+          <button type="button" id="btnMgFetch" class="row action">Fetch Gmail address</button>
           <button type="button" id="btnMgTest" class="row action">Test connection</button>
         </div>
         <p id="mgStatus" class="footer" role="status">Your key is stored only in this browser.</p>
