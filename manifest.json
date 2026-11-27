@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TempMail — Disposable Email",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Persistent disposable email with inbox, notifications, OTP detection and one-click form autofill. Catchmail.io, temp.tf and MyGmail (your own Gmail aliases).",
   "permissions": [
     "storage",

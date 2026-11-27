@@ -9,7 +9,7 @@
 [![Chrome](https://img.shields.io/badge/Chrome%20%2F%20Brave-MV3-4f46e5?logo=googlechrome&logoColor=white)](#install)
 [![License: MIT](https://img.shields.io/badge/License-MIT-059669.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/nullstacks/temp-mail-extension?display_name=tag&sort=semver)](https://github.com/nullstacks/temp-mail-extension/releases/latest)
-[![Version](https://img.shields.io/badge/version-1.5.1-4f46e5)](#recent-changes)
+[![Version](https://img.shields.io/badge/version-1.5.2-4f46e5)](#recent-changes)
 [![No dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](#requirements)
 
 **[Install](INSTALL.md)** · **[Features](#features)** · **[Screenshots](#screenshots)** · **[Releases](https://github.com/nullstacks/temp-mail-extension/releases)**
@@ -55,7 +55,7 @@ git clone https://github.com/nullstacks/temp-mail-extension.git
 
 Then open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode** → **Load unpacked** → select the cloned folder.
 
-Prefer a zip? Download the `.zip` attached to the [latest release](https://github.com/nullstacks/temp-mail-extension/releases/latest), unzip, and load that folder instead. Use the source install above for the latest MyGmail changes.
+Prefer a zip? Download the `.zip` attached to the [latest release](https://github.com/nullstacks/temp-mail-extension/releases/latest), unzip, and load that folder instead.
 
 > 📖 Full walkthrough — including updating, uninstalling and troubleshooting: **[INSTALL.md](INSTALL.md)**
 
