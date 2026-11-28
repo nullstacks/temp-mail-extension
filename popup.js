@@ -158,11 +158,11 @@ function renderList() {
     const codes = codesOf(m);
     const chips = codes.map(c => `<button class="code-chip" data-code="${esc(c)}" title="Copy code" aria-label="Copy code ${esc(c)}">${esc(c)}${ic('copy', 'ic i-copy')}${ic('check', 'ic i-check')}</button>`).join('');
     return `<li class="row${state.seen.has(m.id) ? '' : ' unread'}" data-id="${esc(m.id)}">
-      <span class="dot"></span>
+      <span class="dot" aria-hidden="true"></span>
       <div class="li-body">
         <button class="message-open" type="button">
-          <span class="li-top"><span class="from">${esc(senderName(m.from))}</span><span class="time">${esc(ago(m.date))}</span></span>
-          <span class="subj">${esc(m.subject || '(no subject)')}</span>
+          <span class="li-top"><span class="subj">${esc(m.subject || '(no subject)')}</span><span class="time">${esc(ago(m.date))}</span></span>
+          <span class="from">${esc(senderName(m.from))}</span>
           <span class="snip">${esc(bodyText(m).slice(0, 110))}</span>
         </button>
         ${chips ? `<div class="codes">${chips}</div>` : ''}
@@ -187,6 +187,7 @@ async function refresh(manual = false) {
 
 async function loadAll() {
   state.settings = await TM.getSettings();
+  applyTheme(state.settings.theme);
   state.paused = await TM.isPaused(); renderPause();
   try {
     state.current = await TM.ensureEmail();
@@ -335,8 +336,15 @@ async function ensureMgAccess() {
   catch (_) { return false; }
 }
 
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === 'light' || theme === 'dark' ? theme : 'auto';
+}
+
 function renderSettings() {
   const s = state.settings;
+  document.querySelectorAll('#themeSeg input').forEach(input => {
+    input.checked = input.value === document.documentElement.dataset.theme;
+  });
   ui.provider = ['catchmail', 'temptf', 'mygmail'].includes(s.provider) ? s.provider : 'catchmail';
   const dom = (s.catchmailDomain || 'catchmail.io').toLowerCase();
   ui.custom = !CM_DOMAINS.includes(dom);
@@ -363,6 +371,8 @@ async function renderHistory() {
 }
 async function saveSettings() {
   const s = state.settings;
+  s.theme = $('#themeSeg input:checked').value;
+  applyTheme(s.theme);
   s.provider = ui.provider;
   s.mygmailKey = $('#sMgKey').value.trim();
   s.mygmailEmail = $('#sMgEmail').value.trim();

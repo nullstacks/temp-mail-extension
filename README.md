@@ -31,12 +31,13 @@ TempMail gives Chrome and Brave a disposable inbox that checks for mail in the b
 - **Safe message viewer** — sandboxed iframe, remote images blocked until you allow them, attachments downloadable
 - **Privacy controls** — pause button (⏸) stops all background checks, wake-ups and notifications until you resume; address history (last 5)
 - **Three mail providers** — Catchmail (3 domains + custom domains via MX), temp.tf, and **MyGmail**: your own Gmail via +aliases and dot variants, switchable in Settings
-- **Light and dark themes** — follows your system setting, with visible focus and keyboard navigation through inbox messages
+- **Theme preference** — choose Auto, Light, or Dark under Settings → Appearance. Auto follows your system.
 
 ## Recent changes
 
 - **MyGmail setup** now uses Nullstacks MailAPI. **Fetch Gmail address** fills in the Gmail address associated with your API key. [Setup instructions](#mygmail-setup)
 - **Compact address card** puts **Copy** first, with **Autofill** and **New** alongside it.
+- **Grouped inbox** puts the check status, messages, and empty state in one panel. Message rows lead with the subject and keep one-click code copying.
 - **Keyboard navigation** lets you open inbox messages with Enter or Space. Going back returns focus to the message you opened.
 
 ## Screenshots

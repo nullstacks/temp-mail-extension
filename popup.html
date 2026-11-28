@@ -70,20 +70,20 @@
         <div class="row warn"><svg class="ic lead" aria-hidden="true"><use href="#i-pause"/></svg><span class="grow">Auto-check is paused</span><button id="btnResume" class="link">Resume</button></div>
       </div>
 
-      <div class="sect-head">
-        <div>
-          <h2>Inbox</h2>
+      <section class="group inbox" aria-labelledby="inboxTitle">
+        <div class="sect-head">
+          <span class="inbox-icon"><svg class="ic" aria-hidden="true"><use href="#i-mail"/></svg></span>
+          <h2 id="inboxTitle">Inbox</h2>
+          <button id="btnReadAll" class="link" hidden>Mark all read</button>
           <div class="sub"><span id="count"></span><span id="updated"></span></div>
         </div>
-        <button id="btnReadAll" class="link" hidden>Mark all read</button>
-      </div>
-      <div id="status" class="alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-triangle-alert"/></svg><span id="statusText"></span></div>
-      <ul id="list" class="group list"></ul>
-      <div id="empty" class="empty" hidden>
-        <span class="empty-icon"><svg class="ic" aria-hidden="true"><use href="#i-mail"/></svg></span>
-        <div class="t">No mail yet</div>
-        <div class="d">Verification codes and links appear here as soon as they arrive.</div>
-      </div>
+        <div id="status" class="alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-triangle-alert"/></svg><span id="statusText"></span></div>
+        <ul id="list" class="list"></ul>
+        <div id="empty" class="empty" hidden>
+          <div class="t">No mail yet</div>
+          <div class="d">Verification codes and links appear here as soon as they arrive.</div>
+        </div>
+      </section>
     </div>
   </main>
 
@@ -114,8 +114,14 @@
       <span></span>
     </div>
     <div class="body set">
+      <h2 class="glabel" id="themeLabel">Appearance</h2>
+      <fieldset id="themeSeg" class="seg" aria-labelledby="themeLabel">
+        <label><input type="radio" name="theme" value="auto" checked><span class="seg-btn">Auto</span></label>
+        <label><input type="radio" name="theme" value="light"><span class="seg-btn">Light</span></label>
+        <label><input type="radio" name="theme" value="dark"><span class="seg-btn">Dark</span></label>
+      </fieldset>
 
-      <h2 class="glabel provider-label" id="providerLabel">Email provider</h2>
+      <h2 class="glabel" id="providerLabel">Email provider</h2>
       <div class="seg" id="provSeg" role="radiogroup" aria-labelledby="providerLabel">
         <button type="button" class="seg-btn" role="radio" data-provider="catchmail">Catchmail</button>
         <button type="button" class="seg-btn" role="radio" data-provider="temptf">temp.tf</button>

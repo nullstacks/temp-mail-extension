@@ -196,6 +196,7 @@ const TM = (() => {
   const store = chrome.storage.local;
 
   const DEFAULTS = {
+    theme: 'auto',
     dot: true,
     plus: true,
     providers: { catchmail: true, gmail: true, outlook: false, hotmail: false, edu: false },
